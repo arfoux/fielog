@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createKernel } from '../src/kernel.ts';
 
 async function waitFor(cond: () => boolean, ms = 15000): Promise<void> {
@@ -18,7 +19,8 @@ async function waitFor(cond: () => boolean, ms = 15000): Promise<void> {
 describe('kill9 recovery', () => {
   it('survives SIGKILL mid-append with zero corruption', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-kill9-'));
-    const proc = Bun.spawn(['bun', 'test/helpers/kill-child.ts', dir, '5000'], {
+    const child = fileURLToPath(new URL('./helpers/kill-child.ts', import.meta.url));
+    const proc = Bun.spawn(['bun', child, dir, '5000'], {
       stdout: 'ignore',
       stderr: 'ignore',
     });
