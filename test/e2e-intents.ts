@@ -1,0 +1,40 @@
+// e2e-intents.ts — deterministic mixed-event generator shared by the full
+// journey test and its SIGKILL crash child. Position-based, crash-safe:
+// intents carry no event ids, so a killed-then-continued slice replays clean.
+export type Intent =
+  | { type: 'bayar'; nominal: number; oleh: string }
+  | { type: 'stock.add'; payload: { item: string; qty: number }; actor: string }
+  | { type: 'stock.sell'; payload: { item: string; qty: number }; actor: string };
+
+const ACTORS = ['kasir-1', 'kasir-2', 'kasir-3'];
+
+export function intentFor(i: number): Intent {
+  const actor = ACTORS[i % ACTORS.length];
+  if (i === 0) return { type: 'stock.add', payload: { item: 'kopi', qty: 2000 }, actor: 'gudang' };
+  if (i === 1) return { type: 'stock.add', payload: { item: 'beras', qty: 2000 }, actor: 'gudang' };
+  const m = i % 10;
+  if (m <= 5) return { type: 'bayar', nominal: 1000 + ((i * 37) % 9000), oleh: actor };
+  if (m === 6)
+    return { type: 'stock.add', payload: { item: i % 20 === 6 ? 'kopi' : 'beras', qty: 20 }, actor };
+  if (m === 7 || m === 8)
+    return { type: 'stock.sell', payload: { item: i % 2 === 0 ? 'kopi' : 'beras', qty: 1 + (i % 4) }, actor };
+  return { type: 'bayar', nominal: 2000 + ((i * 53) % 5000), oleh: actor };
+}
+
+// In-test mirror of the read-model for bayar totals and stock levels.
+// Sells never oversell by construction (seed 2000 + steady top-ups).
+export interface Mirror {
+  bayarTotal: number;
+  stock: Record<string, number>;
+}
+
+export function mirrorFor(range: [number, number]): Mirror {
+  const m: Mirror = { bayarTotal: 0, stock: {} };
+  for (let i = range[0]; i < range[1]; i++) {
+    const it = intentFor(i);
+    if (it.type === 'bayar') m.bayarTotal += it.nominal;
+    else if (it.type === 'stock.add') m.stock[it.payload.item] = (m.stock[it.payload.item] ?? 0) + it.payload.qty;
+    else m.stock[it.payload.item] = (m.stock[it.payload.item] ?? 0) - it.payload.qty;
+  }
+  return m;
+}
