@@ -6,7 +6,9 @@
     "strict": true,
     "outDir": "dist",
     "declaration": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": ["node", "bun-types"],
+    "rootDir": "src"
   },
-  "include": ["src", "test"]
+  "include": ["src"]
 }

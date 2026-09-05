@@ -5,16 +5,22 @@ Write anywhere, settle later.
 Offline-first primitives for apps that must survive bank-down, blank-spot,
 blackout: append-only log (source of truth) + SQLite read-model + sync-later.
 
-## Core API (v0.1 target)
+## Core API (v0.1)
 
-```ts
-import { createKernel } from 'fielog'
-const k = await createKernel({ file: 'kasir.db' })
-await k.append({ type: 'bayar', nominal: 50000, oleh: 'budi' })
-const rows = await k.query('SELECT sum(nominal) FROM bayar')
-await k.sync('wss://relay-anda')
-await k.undo(lastId)
+```js
+// example/kasir.mjs — runs with: bun example/kasir.mjs
+import { createKernel, MemoryRelay } from '../dist/index.js';
+const k = await createKernel({ file: 'kasir.db' });
+const tx = await k.append({ type: 'bayar', nominal: 50000, oleh: 'budi' });
+console.log(await k.query('SELECT sum(nominal) AS total FROM bayar WHERE voided = 0'));
+// → [ { total: 50000 } ] — state is IOU_RECORDED (not paid), no network touched
+await k.sync(new MemoryRelay()); // delta push/pull; pass your own Relay for wss
+await k.undo(tx.id);
+k.close();
 ```
+
+`sync` takes a `Relay` object (`push`/`pull`, see `src/sync.ts` — `MemoryRelay`
+is ~50 lines). Raw URL transports (`wss://relay-anda`) are not bundled in v0.1.
 
 ## Rules (non-negotiable)
 

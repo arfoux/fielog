@@ -1,18 +1,22 @@
-// fielog v0.1 — kernel skeleton. Worker owns full implementation.
-// Contract: append/query/undo/sync per README. No network on append/query.
-export type EventType = string;
-export interface FielogEvent {
-  id: string; // UUID
-  seq?: number; // local monotonic, assigned on append
-  type: EventType;
-  ts_device?: number; // wall clock, display only, never authoritative
-  actor?: string;
-  payload: Record<string, unknown>;
-}
-export interface KernelOpts {
-  file: string; // e.g. 'kasir.db' (+ sidecar '.log')
-  relay?: string;
-}
-export async function createKernel(_opts: KernelOpts) {
-  throw new Error('not implemented — worker task');
-}
+// fielog v0.1 — offline-first kernel: append-only log + SQLite read-model + sync.
+export { openLog, hashFor, canonicalOf, GENESIS_HASH } from './log.js';
+export type { LogEvent, AppendInput, AppendLog } from './log.js';
+export { openStore, MoneyState, checkAppend } from './store.js';
+export type { EventStore, MoneyState as MoneyStateType, SqlParams } from './store.js';
+export { MemoryRelay, pushPending, pullRemote, syncKernel, withBackoff, backoffMs, getAckSeq, getServerTime } from './sync.js';
+export type { Relay, PushAck, PushResult, PullResult, SyncOpts } from './sync.js';
+export {
+  generateDeviceKey,
+  signBytes,
+  verifyBytes,
+  signEvent,
+  verifyEvent,
+  issueGrant,
+  verifyGrant,
+  RevocationList,
+  countersignEvent,
+  checkThreshold,
+} from './auth.js';
+export type { DeviceKeypair, ScopeGrant, Countersignature } from './auth.js';
+export { createKernel, logPathFor } from './kernel.js';
+export type { Kernel, KernelOpts, AppendArgs } from './kernel.js';
