@@ -18,6 +18,7 @@ export interface SyncOpts {
   chunkSize?: number;
   maxRetries?: number;
   baseMs?: number;
+  maxMs?: number; // backoff cap; chaos tests pin this low
 }
 
 const ACK_SEQ_KEY = 'sync.ack_seq'; // local seq fully acked by the relay
@@ -33,21 +34,22 @@ export function getServerTime(store: EventStore): number | null {
   return v === null ? null : Number(v);
 }
 
-/** Backoff with jitter: baseMs * 2^attempt, capped at 30s. */
-export function backoffMs(attempt: number, baseMs = 200): number {
-  return Math.min(30_000, baseMs * 2 ** attempt) + Math.floor(Math.random() * 100);
+/** Backoff with jitter: baseMs * 2^attempt, capped at maxMs. */
+export function backoffMs(attempt: number, baseMs = 200, maxMs = 30_000): number {
+  return Math.min(maxMs, baseMs * 2 ** attempt) + Math.floor(Math.random() * 100);
 }
 
 export async function withBackoff<T>(fn: () => Promise<T>, opts: SyncOpts = {}): Promise<T> {
   const maxRetries = opts.maxRetries ?? 5;
   const baseMs = opts.baseMs ?? 200;
+  const maxMs = opts.maxMs ?? 30_000;
   let attempt = 0;
   for (;;) {
     try {
       return await fn();
     } catch (err) {
       if (attempt >= maxRetries) throw err;
-      await new Promise((r) => setTimeout(r, backoffMs(attempt, baseMs)));
+      await new Promise((r) => setTimeout(r, backoffMs(attempt, baseMs, maxMs)));
       attempt += 1;
     }
   }

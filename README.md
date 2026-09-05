@@ -5,7 +5,7 @@ Write anywhere, settle later.
 Offline-first primitives for apps that must survive bank-down, blank-spot,
 blackout: append-only log (source of truth) + SQLite read-model + sync-later.
 
-## Core API (v0.1)
+## Core API (v0.2)
 
 ```js
 // example/kasir.mjs — runs with: bun example/kasir.mjs
@@ -20,7 +20,16 @@ k.close();
 ```
 
 `sync` takes a `Relay` object (`push`/`pull`, see `src/sync.ts` — `MemoryRelay`
-is ~50 lines). Raw URL transports (`wss://relay-anda`) are not bundled in v0.1.
+is ~50 lines). For a real socket, `src/relay.ts` has `WsRelayServer` (Bun.serve,
+file-backed so kill+restart resumes exact-once) + `WsRelayClient` (reconnect
+with backoff, heartbeat, live broadcast hints):
+
+```js
+import { WsRelayServer, WsRelayClient } from './src/index.ts';
+const server = new WsRelayServer({ port: 8090, file: 'relay.log' });
+await server.start();
+await k.sync(new WsRelayClient('ws://127.0.0.1:8090'));
+```
 
 ## Rules (non-negotiable)
 

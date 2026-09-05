@@ -20,3 +20,5 @@ export {
 export type { DeviceKeypair, ScopeGrant, Countersignature } from './auth.js';
 export { createKernel, logPathFor } from './kernel.js';
 export type { Kernel, KernelOpts, AppendArgs } from './kernel.js';
+export { WsRelayServer, WsRelayClient, mulberry32 } from './relay.js';
+export type { WsRelayServerOpts, WsRelayClientOpts } from './relay.js';
