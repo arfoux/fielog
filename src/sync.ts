@@ -353,6 +353,7 @@ export async function syncWithFailover(
   }
   const chunkSize = opts.chunkSize ?? 10;
   let cursor = getAckSeq(store);
+  const runStart = cursor;
   let pushed = 0;
   let acked = 0;
   let serverTime: number | null = getServerTime(store);
@@ -361,7 +362,22 @@ export async function syncWithFailover(
   for (;;) {
     const batch = log.readAfter(cursor).slice(0, chunkSize);
     if (batch.length === 0) break;
+    const chunkStart = cursor;
     const one = await failoverPushOne(log, store, relays, batch, cursor, opts, st);
+    if (pushRelay >= 0 && one.relay !== pushRelay) {
+      // Relay switch after acked chunks would stripe one log across relays
+      // (chunk 1 on A, rest on B) and a client reading a single relay then
+      // misses the other part with success status. Re-push this run's acked
+      // prefix to the new relay (idempotent by UUID) so the newest relay
+      // always ends complete. Loud on failure: the retry re-drives it.
+      const prefix = log.readAfter(runStart).slice(0, chunkStart - runStart);
+      for (let off = 0; off < prefix.length; off += chunkSize) {
+        const b = prefix.slice(off, off + chunkSize);
+        const pre = off === 0 ? runStart : prefix[off - 1].seq;
+        const ack = await withBackoff(() => relays[one.relay].push(b), opts);
+        applyPushAck(store, b, ack, pre);
+      }
+    }
     pushed += batch.length;
     acked += one.acked;
     serverTime = one.serverTime;

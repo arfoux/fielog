@@ -51,15 +51,23 @@ describe('relay failover', () => {
     assert.equal(res.acked, 20);
     assert.equal(k.ackSeq(), 20);
     assert.equal(res.pushRelay, 1); // last chunk served by the secondary
-    // Chunk 1 lives on the primary only; chunks 2-4 stuck to the secondary.
+    // Relay switch must backfill this run's acked prefix to the new relay:
+    // chunk 1 was acked on the primary, so the secondary must end complete.
     assert.equal(primary.pushesReceived, 1);
     assert.ok(secondary.pushesReceived >= 3);
     assert.equal(primary.size, 5);
-    assert.equal(secondary.size, 15);
+    assert.equal(secondary.size, 20);
     // Pull rides the secondary too; own echoes apply nothing twice.
     assert.equal(res.applied, 0);
     const rows = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM bayar WHERE voided = 0`);
     assert.equal(rows[0].n, 20);
+    // A third device reading the newest relay converges on all 20 events.
+    const kc = await createKernel({ file: join(dir, 'c.db') });
+    closers.push(() => kc.close());
+    const rc = await kc.sync(secondary, { ...fast });
+    assert.equal(rc.applied, 20);
+    const rowsC = await kc.query<{ n: number }>(`SELECT COUNT(*) AS n FROM bayar WHERE voided = 0`);
+    assert.equal(rowsC[0].n, 20);
   });
 
   it('re-probes the healed primary and fails back to list order', async () => {
