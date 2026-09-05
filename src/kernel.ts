@@ -17,7 +17,7 @@ import {
   type SyncOpts,
 } from './sync.js';
 import { clampSealToStored, takeSnapshot, sweepLogFile } from './retain.js';
-import { mintCapToken, type CapToken } from './auth.js';
+import { mintCapToken, signEvent, type CapToken } from './auth.js';
 
 export interface KernelOpts {
   file: string; // e.g. 'kasir.db' (+ sidecar 'kasir.log')
@@ -26,6 +26,9 @@ export interface KernelOpts {
   clock?: () => number;
   /** Max locally queued events awaiting ack (default 50_000). Append past it throws ERR_OUTBOX_FULL. */
   maxPending?: number;
+  /** ed25519 private key PEM: every local append is signed at source, so
+   * trusted-mode receivers verify (not dead-letter) legitimate traffic. */
+  privateKeyPem?: string;
 }
 
 /** Default bound on unsynced outbox events before append refuses with ERR_OUTBOX_FULL. */
@@ -104,7 +107,8 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
   const store: EventStore = openStore(dbPath);
   const deviceId: string = opts.deviceId ?? store.getMeta('device.id') ?? randomUUID();
   if (!store.getMeta('device.id')) store.setMeta('device.id', deviceId);
-  let log: AppendLog = openLog(logPath, deviceId);
+  const signer = opts.privateKeyPem ? (ev: LogEvent) => signEvent(opts.privateKeyPem as string, ev) : undefined;
+  let log: AppendLog = openLog(logPath, deviceId, signer);
   // Crash recovery: replay the log into the read-model (idempotent by UUID),
   // then excise rows the log no longer carries (quarantined, never swept).
   store.replay(log.readAll());
@@ -186,7 +190,7 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
         if (effective <= 0) return { removed: 0, kept: log.readAll().length, sealedSeq: 0 };
         log.close();
         const res = sweepLogFile(logPath, effective);
-        log = openLog(logPath, deviceId);
+        log = openLog(logPath, deviceId, signer);
         store.replay(log.readAll()); // incremental: kept suffix re-applies, db stands
         store.exciseMissing(
           log.readAll().map((e) => e.seq),

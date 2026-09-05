@@ -1,20 +1,28 @@
 #!/usr/bin/env bun
 // bin/fielog.ts — cli kecil: serve relay ws, sync file kernel, demo kasir 2hp.
-// bun only. contoh:
-//   bun bin/fielog.ts serve --port 8091 --file ./relay.log
-//   bun bin/fielog.ts sync --file ./kasir.db --relay ws://127.0.0.1:8091
+// bun only. mode tanda default: serve butuh --trust id=pub.pem (boleh ulang)
+// dan sync butuh --key priv.pem --as <device>; --unsigned memilih relay
+// terbuka warisan (menerima device_id apa pun, hanya untuk dev lokal).
+// contoh:
+//   bun bin/fielog.ts serve --port 8091 --file ./relay.log --trust kasir=./kasir.pub
+//   bun bin/fielog.ts sync --file ./kasir.db --relay ws://127.0.0.1:8091 --key ./kasir.priv --as kasir
+//   bun bin/fielog.ts serve --port 8091 --file ./relay.log --unsigned
 //   bun bin/fielog.ts demo
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createKernel, WsRelayClient, WsRelayServer } from '../src/index.ts';
+import { createKernel, generateDeviceKey, WsRelayClient, WsRelayServer } from '../src/index.ts';
 
 function usage(): string {
   return [
     'pakai: fielog <serve|sync|demo> [opsi]',
-    '  serve --port <n> --file <relay.log>   jalan relay ws file-backed',
-    '  sync --file <kasir.db> --relay <ws url> dorong+tari delta kernel',
-    '  demo                                   kasir 2hp offline lalu sync, total sama',
+    '  serve --port <n> --file <relay.log> --trust <id=pub.pem> [--trust ...]',
+    '    jalan relay ws file-backed mode tanda (tolak device tak dikenal)',
+    '  serve --port <n> --file <relay.log> --unsigned   relay terbuka (dev saja)',
+    '  sync --file <kasir.db> --relay <ws url> --key <priv.pem> --as <device>',
+    '    dorong+tari delta kernel dengan token kapabilitas',
+    '  sync --file <kasir.db> --relay <ws url> --unsigned   tanpa tanda (dev saja)',
+    '  demo   kasir 2hp offline lalu sync mode tanda, total sama',
   ].join('\n');
 }
 
@@ -24,10 +32,38 @@ function arg(args: string[], name: string, def?: string): string | undefined {
   return args[i + 1] ?? def;
 }
 
+function argAll(args: string[], name: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i + 1 < args.length; i++) if (args[i] === name) out.push(args[i + 1]);
+  return out;
+}
+
+function die(msg: string): never {
+  console.error(msg);
+  console.error(usage());
+  process.exit(2);
+}
+
 async function cmdServe(rest: string[]): Promise<void> {
   const port = Number(arg(rest, '--port', '8091'));
   const file = arg(rest, '--file', 'relay.log')!;
-  const server = new WsRelayServer({ port, file });
+  const unsigned = rest.includes('--unsigned');
+  const trustedDevices: Record<string, string> = {};
+  for (const t of argAll(rest, '--trust')) {
+    const eq = t.indexOf('=');
+    if (eq < 0) die(`--trust mau id=jalur-pubkey, dapat: ${t}`);
+    const id = t.slice(0, eq);
+    if (!id) die(`--trust mau id=jalur-pubkey, dapat: ${t}`);
+    try {
+      trustedDevices[id] = readFileSync(t.slice(eq + 1), 'utf8').trim();
+    } catch {
+      die(`pubkey tak terbaca untuk --trust ${id}: ${t.slice(eq + 1)}`);
+    }
+  }
+  if (Object.keys(trustedDevices).length === 0 && !unsigned) {
+    die('serve butuh --trust <id=pub.pem> atau --unsigned untuk relay terbuka');
+  }
+  const server = new WsRelayServer({ port, file, trustedDevices, allowUnsigned: unsigned });
   const actual = await server.start();
   console.log(`fielog relay listening ws://127.0.0.1:${actual} file=${file}`);
   console.log(`ready port=${actual}`);
@@ -43,12 +79,16 @@ async function cmdServe(rest: string[]): Promise<void> {
 async function cmdSync(rest: string[]): Promise<void> {
   const file = arg(rest, '--file');
   const relay = arg(rest, '--relay');
-  if (!file || !relay) {
-    console.error(usage());
-    process.exit(2);
-  }
-  const kernel = await createKernel({ file });
-  const client = new WsRelayClient(relay);
+  if (!file || !relay) die(usage());
+  const unsigned = rest.includes('--unsigned');
+  const keyPath = arg(rest, '--key');
+  const asId = arg(rest, '--as');
+  if (!keyPath && !unsigned) die('sync butuh --key <priv.pem> --as <device> atau --unsigned untuk tanpa tanda');
+  if (keyPath && !asId) die('sync --key butuh pasangan --as <device>');
+  const privateKeyPem = keyPath ? readFileSync(keyPath, 'utf8').trim() : undefined;
+  const kernel = await createKernel({ file: file as string, deviceId: asId, privateKeyPem });
+  const token = privateKeyPem ? kernel.capToken(privateKeyPem) : undefined;
+  const client = new WsRelayClient(relay as string, token ? { capToken: token } : {});
   try {
     const r = await kernel.sync(client);
     console.log(`sync pushed=${r.pushed} acked=${r.acked} pulled=${r.pulled} applied=${r.applied}`);
@@ -60,12 +100,14 @@ async function cmdSync(rest: string[]): Promise<void> {
 
 async function cmdDemo(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'fielog-demo-'));
-  const server = new WsRelayServer({ port: 0, file: join(dir, 'relay.log') });
+  const k1 = generateDeviceKey('hp1');
+  const k2 = generateDeviceKey('hp2');
+  const server = new WsRelayServer({ port: 0, file: join(dir, 'relay.log'), trustedDevices: { hp1: k1.publicKeyPem, hp2: k2.publicKeyPem } });
   const port = await server.start();
-  const hp1 = await createKernel({ file: join(dir, 'hp1.db') });
-  const hp2 = await createKernel({ file: join(dir, 'hp2.db') });
-  const c1 = new WsRelayClient(`ws://127.0.0.1:${port}`);
-  const c2 = new WsRelayClient(`ws://127.0.0.1:${port}`);
+  const hp1 = await createKernel({ file: join(dir, 'hp1.db'), deviceId: 'hp1', privateKeyPem: k1.privateKeyPem });
+  const hp2 = await createKernel({ file: join(dir, 'hp2.db'), deviceId: 'hp2', privateKeyPem: k2.privateKeyPem });
+  const c1 = new WsRelayClient(`ws://127.0.0.1:${port}`, { capToken: hp1.capToken(k1.privateKeyPem) });
+  const c2 = new WsRelayClient(`ws://127.0.0.1:${port}`, { capToken: hp2.capToken(k2.privateKeyPem) });
   try {
     let expected = 0;
     for (let i = 0; i < 20; i++) {
@@ -73,8 +115,8 @@ async function cmdDemo(): Promise<void> {
       expected += nominal;
       await hp1.append({ type: 'bayar', nominal, oleh: 'kasir-1' });
     }
-    await hp1.sync(c1);
-    await hp2.sync(c2);
+    await hp1.sync(c1, { trustedDevices: { hp2: k2.publicKeyPem } });
+    await hp2.sync(c2, { trustedDevices: { hp1: k1.publicKeyPem } });
     const t1 = await hp1.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
     const t2 = await hp2.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
     console.log(`sync: hp1 = ${t1[0].total} | hp2 = ${t2[0].total} | mau = ${expected}`);

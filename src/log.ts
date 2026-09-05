@@ -118,7 +118,7 @@ export interface AppendLog {
   close(): void;
 }
 
-export function openLog(path: string, defaultDeviceId: string): AppendLog {
+export function openLog(path: string, defaultDeviceId: string, signer?: (ev: LogEvent) => string): AppendLog {
   const dir = dirname(path);
   if (dir !== '' && dir !== '.') mkdirSync(dir, { recursive: true });
   const quarantinePath = path + '.quarantine';
@@ -225,6 +225,13 @@ export function openLog(path: string, defaultDeviceId: string): AppendLog {
         server_time: input.server_time,
       };
       const ev: LogEvent = { ...core, hash: hashFor(core) };
+      // Source signing: the device key covers the chain hash BEFORE the line
+      // hits disk, so relayed copies always carry a verifiable signature and
+      // trusted-mode receivers apply (not dead-letter) legitimate traffic.
+      // input.signature is never preserved: it covered the origin hash, which
+      // the local re-hash replaced — keeping it would fail verification under
+      // the local device_id and brick relayed pulls.
+      if (signer && !ev.signature) ev.signature = signer(ev);
       writeSync(fd, JSON.stringify(ev) + '\n');
       fsyncSync(fd); // durable before ack — offline means the disk is the server
       events.push(ev);

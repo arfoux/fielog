@@ -18,6 +18,9 @@ export interface WsRelayServerOpts {
   seed?: number; // chaos rng seed
   /** Pre-trusted devices: deviceId -> ed25519 publicKeyPem. Enforcement is on when non-empty. */
   trustedDevices?: Record<string, string>;
+  /** Refuse to serve without a device registry (default true = legacy open
+   * relay for library/dev use). The CLI passes false unless --unsigned. */
+  allowUnsigned?: boolean;
 }
 
 type ToServer =
@@ -160,6 +163,11 @@ export class WsRelayServer {
   }
 
   async start(): Promise<number> {
+    // Fail closed: an unsigned relay accepts any forged device_id, so
+    // production entrypoints must register a device or opt into --unsigned.
+    if (!this.enforcing && this.opts.allowUnsigned === false) {
+      throw new Error('relay refuses unsigned mode: register a trusted device or pass --unsigned to opt into the open relay');
+    }
     const self = this;
     if (this.opts.file) {
       const dir = dirname(this.opts.file);

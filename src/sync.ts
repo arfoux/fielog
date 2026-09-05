@@ -136,6 +136,7 @@ function applyPullEvents(
   events: LogEvent[],
   cursor: number,
   opts: SyncOpts = {},
+  cursorKey = PULL_CURSOR_KEY,
 ): number {
   const registry = registryOf(opts.trustedDevices);
   let applied = 0;
@@ -200,7 +201,7 @@ function applyPullEvents(
     }
     applied += 1;
   }
-  if (events.length && storedAll) store.setMeta(PULL_CURSOR_KEY, String(cursor));
+  if (events.length && storedAll) store.setMeta(cursorKey, String(cursor));
   return applied;
 }
 
@@ -386,9 +387,12 @@ export async function syncWithFailover(
     if (one.advanced < batch[batch.length - 1].seq) break; // partial ack: stop, resume next run
   }
 
-  // Pull from the first healthy relay in list order; own events echo back
-  // but apply stays idempotent by UUID.
-  const since = Number(store.getMeta(PULL_CURSOR_KEY) ?? 0);
+  // Pull from EVERY healthy relay with a per-relay cursor. A single shared
+  // cursor pins readers to the first relay's coordinates: when list order
+  // puts a stale replica first, the suffix living only on fresher replicas
+  // is missed with success status. Per-relay cursors (seeded once from the
+  // legacy shared cursor) plus UUID-idempotent apply close it; own echoes
+  // apply nothing twice.
   let pullRelay = -1;
   let pulled = 0;
   let applied = 0;
@@ -403,14 +407,15 @@ export async function syncWithFailover(
         continue;
       }
       try {
+        const key = `${PULL_CURSOR_KEY}.r${i}`;
+        const since = Number(store.getMeta(key) ?? store.getMeta(PULL_CURSOR_KEY) ?? 0);
         const res = await relays[i].pull(since);
-        applied = applyPullEvents(log, store, deviceId, res.events, res.cursor, opts);
-        pulled = res.events.length;
-        pullRelay = i;
+        applied += applyPullEvents(log, store, deviceId, res.events, res.cursor, opts, key);
+        pulled += res.events.length;
+        if (pullRelay < 0) pullRelay = i;
         st.fails[i] = 0;
         st.notBefore[i] = 0;
         done = true;
-        break;
       } catch (err) {
         lastErr = err;
         failoverNoteFailure(st, i, opts);

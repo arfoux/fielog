@@ -61,7 +61,7 @@ describe('cli', () => {
     const adb = join(dir, 'a.db');
     const bdb = join(dir, 'b.db');
 
-    const serve = Bun.spawn([BUN, CLI, 'serve', '--port', '0', '--file', relayFile], {
+    const serve = Bun.spawn([BUN, CLI, 'serve', '--port', '0', '--file', relayFile, '--unsigned'], {
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -78,11 +78,11 @@ describe('cli', () => {
     }
     ka.close();
 
-    const up = await runOnce(['sync', '--file', adb, '--relay', url]);
+    const up = await runOnce(['sync', '--file', adb, '--relay', url, '--unsigned']);
     assert.equal(up.code, 0, `sync a gagal: ${up.err} ${up.out}`);
     assert.match(up.out, /acked=20/);
 
-    const down = await runOnce(['sync', '--file', bdb, '--relay', url]);
+    const down = await runOnce(['sync', '--file', bdb, '--relay', url, '--unsigned']);
     assert.equal(down.code, 0, `sync b gagal: ${down.err} ${down.out}`);
     assert.match(down.out, /applied=20/);
 
@@ -104,7 +104,7 @@ describe('cli', () => {
     assert.equal(ids.length, 20);
     assert.equal(new Set(ids).size, 20);
 
-    const again = await runOnce(['sync', '--file', bdb, '--relay', url]);
+    const again = await runOnce(['sync', '--file', bdb, '--relay', url, '--unsigned']);
     assert.equal(again.code, 0, `sync ulang gagal: ${again.err}`);
     assert.match(again.out, /applied=0/);
     serve.kill(9);
