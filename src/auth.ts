@@ -118,6 +118,57 @@ export function verifyGrant(
   return grant.scopes.includes(scope);
 }
 
+// Capability tokens: the device key itself signs a scope+expiry token.
+// The relay holds a deviceId -> publicKey registry and verifies the
+// signature + scope + expiry on every push/pull. No authority key involved.
+
+export interface CapToken {
+  deviceId: string;
+  scopes: string[]; // e.g. ['relay:push', 'relay:pull']
+  issuedAt: number;
+  expiresAt: number;
+  signature?: string; // device signature over the canonical token
+}
+
+export function canonicalCapToken(t: Omit<CapToken, 'signature'>): string {
+  return JSON.stringify({
+    deviceId: t.deviceId,
+    scopes: [...t.scopes].sort(),
+    issuedAt: t.issuedAt,
+    expiresAt: t.expiresAt,
+  });
+}
+
+export function mintCapToken(
+  privateKeyPem: string,
+  deviceId: string,
+  scopes: string[],
+  ttlMs = 3600 * 1000,
+  now = Date.now(),
+): CapToken {
+  const core: Omit<CapToken, 'signature'> = {
+    deviceId,
+    scopes,
+    issuedAt: now,
+    expiresAt: now + ttlMs,
+  };
+  return { ...core, signature: signBytes(privateKeyPem, canonicalCapToken(core)) };
+}
+
+export function verifyCapToken(
+  publicKeyPem: string,
+  token: CapToken,
+  scope: string,
+  now = Date.now(),
+): boolean {
+  if (!token.signature) return false;
+  if (token.expiresAt <= token.issuedAt) return false;
+  if (now > token.expiresAt) return false;
+  const { signature, ...core } = token;
+  if (!verifyBytes(publicKeyPem, canonicalCapToken(core), signature)) return false;
+  return token.scopes.includes(scope);
+}
+
 // Countersign: high-value moves need ≥ threshold distinct authorized signatures.
 
 export interface Countersignature {

@@ -14,6 +14,7 @@ import {
   type SyncOpts,
 } from './sync.js';
 import { takeSnapshot, sweepLogFile } from './retain.js';
+import { mintCapToken, type CapToken } from './auth.js';
 
 export interface KernelOpts {
   file: string; // e.g. 'kasir.db' (+ sidecar 'kasir.log')
@@ -55,6 +56,8 @@ export interface Kernel {
   /** Settle an IOU: 'settled' needs online ack; failed/expired record locally. */
   settle(eventId: string, outcome: 'settled' | 'failed' | 'expired', actor?: string): Promise<LogEvent>;
   sync(relay: Relay, opts?: SyncOpts): Promise<PushResult & PullResult>;
+  /** Mint a relay capability token for this kernel's deviceId with a device private key. */
+  capToken(privateKeyPem: string, scopes?: string[], ttlMs?: number): CapToken;
   conflicts(): Promise<Record<string, unknown>[]>;
   ackSeq(): number;
   serverTime(): number | null;
@@ -128,6 +131,8 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
       }
       return runSync(log, store, relay as Relay, deviceId, syncOpts);
     },
+    capToken: (privateKeyPem, scopes = ['relay:push', 'relay:pull'], ttlMs = 3600 * 1000) =>
+      mintCapToken(privateKeyPem, deviceId, scopes, ttlMs),
     conflicts: () => Promise.resolve(store.query(`SELECT * FROM conflicts WHERE status = 'open'`)),
     ackSeq: () => getAckSeq(store),
     serverTime: () => getServerTime(store),

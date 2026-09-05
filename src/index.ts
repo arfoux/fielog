@@ -16,8 +16,11 @@ export {
   RevocationList,
   countersignEvent,
   checkThreshold,
+  mintCapToken,
+  verifyCapToken,
+  canonicalCapToken,
 } from './auth.js';
-export type { DeviceKeypair, ScopeGrant, Countersignature } from './auth.js';
+export type { DeviceKeypair, ScopeGrant, Countersignature, CapToken } from './auth.js';
 export { createKernel, logPathFor } from './kernel.js';
 export type { Kernel, KernelOpts, AppendArgs, LogHealth } from './kernel.js';
 export { WsRelayServer, WsRelayClient, mulberry32 } from './relay.js';
