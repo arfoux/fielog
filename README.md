@@ -5,27 +5,43 @@ Write anywhere, settle later.
 Offline-first primitives for apps that must survive bank-down, blank-spot,
 blackout: append-only log (source of truth) + SQLite read-model + sync-later.
 
-## install
+## Install
 
 ```sh
 bun add fielog
+# or: npm i fielog
 ```
 
-## quickstart
+Requires `bun` (>= 1.0) at runtime — `kernel` and `WsRelayServer` use `bun:sqlite` and `Bun.serve`.
+CLI: `bunx fielog demo` or `bun bin/fielog.ts demo`.
 
-```ts
+## Quickstart
+
+```js
 import { createKernel } from 'fielog';
 
-const kernel = await createKernel({ file: 'kasir.db' });
-await kernel.append({ type: 'bayar', nominal: 5000, oleh: 'kasir-1' });
-const rows = await kernel.query('SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0');
-console.log(rows[0]);
-kernel.close();
+const k = await createKernel({ file: 'kasir.db' });
+await k.append({ type: 'bayar', nominal: 5000, oleh: 'kasir-1' });
+const rows = await k.query('SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0');
+console.log(rows[0].total); // 5000
+k.close();
 ```
 
-cli: `bunx fielog demo` runs the two-device kasir roundtrip and proves equal totals.
+Two devices, sync later via a relay (`demo/kasir-2hp.ts`, run with `bun run demo`):
 
-## docs
+```js
+import { createKernel, WsRelayServer, WsRelayClient } from 'fielog';
+
+const server = new WsRelayServer({ port: 8091, file: 'relay.log' });
+await server.start();
+const hp1 = await createKernel({ file: 'hp1.db' });
+const hp2 = await createKernel({ file: 'hp2.db' });
+await hp1.append({ type: 'bayar', nominal: 5000, oleh: 'kasir-1' });
+await hp1.sync(new WsRelayClient('ws://127.0.0.1:8091'));
+await hp2.sync(new WsRelayClient('ws://127.0.0.1:8091'));
+```
+
+## Docs
 
 - benchmarks with measured numbers: [docs/bench.md](docs/bench.md), re-run via `bun run bench:append | bench:query | bench:sync` (scripts in [bench/](bench/))
 - log compat guarantee: [docs/compat.md](docs/compat.md)

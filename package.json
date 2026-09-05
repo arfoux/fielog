@@ -7,6 +7,14 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "files": [
+    "src",
+    "bin",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "docs"
+  ],
   "bin": {
     "fielog": "./bin/fielog.ts"
   },
