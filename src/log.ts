@@ -103,6 +103,9 @@ export interface AppendLog {
   append(input: AppendInput): LogEvent;
   readAll(): LogEvent[];
   readAfter(seq: number): LogEvent[];
+  /** UUID lookup over the live file (dedupe retries without re-appending). */
+  hasId(id: string): boolean;
+  getById(id: string): LogEvent | null;
   maxSeq(): number;
   lastHash(): string;
   verify(): VerifyResult;
@@ -194,6 +197,7 @@ export function openLog(path: string, defaultDeviceId: string): AppendLog {
       }
     }
   }
+  const byId = new Map<string, LogEvent>(events.map((e) => [e.id, e]));
   const keptMax = events.length === 0 ? 0 : Math.max(...events.map((e) => e.seq));
   let nextSeq = Math.max(marker?.next_seq ?? 1, keptMax + 1); // seqs never reused across sweeps
   let tip = events.length === 0 ? (marker?.tip ?? GENESIS_HASH) : events[events.length - 1].hash;
@@ -224,6 +228,7 @@ export function openLog(path: string, defaultDeviceId: string): AppendLog {
       writeSync(fd, JSON.stringify(ev) + '\n');
       fsyncSync(fd); // durable before ack — offline means the disk is the server
       events.push(ev);
+      byId.set(ev.id, ev);
       nextSeq += 1;
       tip = ev.hash;
       return ev;
@@ -233,6 +238,12 @@ export function openLog(path: string, defaultDeviceId: string): AppendLog {
     },
     readAfter(seq: number): LogEvent[] {
       return events.filter((e) => e.seq > seq);
+    },
+    hasId(id: string): boolean {
+      return byId.has(id);
+    },
+    getById(id: string): LogEvent | null {
+      return byId.get(id) ?? null;
     },
     maxSeq(): number {
       return nextSeq - 1;

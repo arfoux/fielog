@@ -16,7 +16,7 @@ import {
   type Relay,
   type SyncOpts,
 } from './sync.js';
-import { takeSnapshot, sweepLogFile } from './retain.js';
+import { clampSealToStored, takeSnapshot, sweepLogFile } from './retain.js';
 import { mintCapToken, type CapToken } from './auth.js';
 
 export interface KernelOpts {
@@ -174,8 +174,18 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
       Promise.resolve().then(() => {
         const sealed = Number(store.getMeta('snapshot.sealed_seq') ?? 0);
         if (sealed <= 0) return { removed: 0, kept: log.readAll().length, sealedSeq: 0 };
+        // Belt and suspenders on top of ack-implies-stored: a stale seal or a
+        // cursor that outran the read-model must shrink to the safely swept
+        // prefix (or to a no-op) instead of deleting unacked/unapplied data.
+        const effective = clampSealToStored(
+          store,
+          log.readAll().map((e) => e.seq),
+          sealed,
+          getAckSeq(store),
+        );
+        if (effective <= 0) return { removed: 0, kept: log.readAll().length, sealedSeq: 0 };
         log.close();
-        const res = sweepLogFile(logPath, sealed);
+        const res = sweepLogFile(logPath, effective);
         log = openLog(logPath, deviceId);
         store.replay(log.readAll()); // incremental: kept suffix re-applies, db stands
         store.exciseMissing(

@@ -65,6 +65,34 @@ export function takeSnapshot(
 }
 
 /**
+ * Clamp a snapshot seal to what truncate may safely sweep: at most the ack
+ * cursor (never remove unacked data), and at most below the first swept seq
+ * missing from the read-model (never remove unapplied data — a stale or
+ * over-advanced ack must not turn into permanent loss). Returns 0 when
+ * nothing is safely sweepable; the caller must treat that as a no-op.
+ */
+export function clampSealToStored(
+  store: EventStore,
+  logSeqs: number[],
+  sealed: number,
+  ackSeq: number,
+): number {
+  let effective = Math.min(sealed, ackSeq);
+  if (!(effective > 0)) return 0;
+  const cands = logSeqs.filter((s) => s <= effective).sort((a, b) => a - b);
+  if (cands.length === 0) return effective;
+  const rows = store.query<{ seq: number }>(`SELECT seq FROM _events WHERE seq <= ?`, [effective]);
+  const have = new Set(rows.map((r) => r.seq));
+  for (const s of cands) {
+    if (!have.has(s)) {
+      effective = s - 1;
+      break;
+    }
+  }
+  return effective > 0 ? effective : 0;
+}
+
+/**
  * Sweep log lines with seq <= sealedSeq. New file = marker + kept lines,
  * fsynced, then atomically renamed over the original. Only successfully
  * parsed events at/below the seal are removed; markers supersede, and

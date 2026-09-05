@@ -69,12 +69,24 @@ function applyPushAck(
   cursor: number,
 ): { advanced: number; acked: number } {
   // Relay is idempotent by UUID: only advance over events it actually acked,
-  // in log order, so a partial ack resumes exactly where it stopped.
+  // in log order, so a partial ack resumes exactly where it stopped. Ack must
+  // additionally imply durable store: a kill between log.append and
+  // store.apply leaves the event on disk but out of the read-model, and
+  // acking it would let truncate sweep it into permanent loss. Re-drive the
+  // logged event first; if it still is not stored, hold the cursor here.
   const ackedSet = new Set(ack.acked);
   let advanced = cursor;
   let acked = 0;
   for (const ev of batch) {
     if (!ackedSet.has(ev.id)) break;
+    if (!store.hasId(ev.id)) {
+      try {
+        store.apply(ev);
+      } catch {
+        break;
+      }
+      if (!store.hasId(ev.id)) break;
+    }
     advanced = ev.seq;
     acked += 1;
   }
@@ -127,12 +139,33 @@ function applyPullEvents(
 ): number {
   const registry = registryOf(opts.trustedDevices);
   let applied = 0;
+  let storedAll = true;
   for (const remote of events) {
     // Fail-fast gate (mirrors kernel append): a poison event must never
     // touch the local log nor pin the pull cursor. Shape + checkAppend run
     // BEFORE log.append; dead-letters are skipped while the cursor below
     // still advances past them, so one bad write can never brick sync.
-    if (!remote || typeof remote.id !== 'string' || remote.id === '' || store.hasId(remote.id)) continue;
+    if (!remote || typeof remote.id !== 'string' || remote.id === '') continue;
+    if (store.hasId(remote.id)) continue;
+    if (log.hasId(remote.id)) {
+      // Logged on an earlier run but never durably stored (kill between
+      // log.append and store.apply, or a held cursor below). Re-drive the
+      // stored copy instead of minting a duplicate log line; a repeated
+      // failure holds the cursor so the next sync retries this batch.
+      const pending = log.getById(remote.id);
+      if (pending === null) {
+        storedAll = false;
+        continue;
+      }
+      try {
+        store.apply(pending);
+      } catch {
+        storedAll = false;
+        continue;
+      }
+      applied += 1;
+      continue;
+    }
     try {
       if (!remote.type || typeof remote.type !== 'string') throw new Error('pull: event without type');
       const payload = (remote.payload ?? {}) as Record<string, unknown>;
@@ -159,14 +192,15 @@ function applyPullEvents(
     try {
       store.apply(ev);
     } catch {
-      // Validated above: only a sqlite-level failure lands here (replay
-      // already treats per-event apply errors the same way). Liveness wins:
-      // the cursor still advances instead of retry-storming this batch.
+      // Sqlite-level failure with the event already fsynced in the log:
+      // hold the pull cursor so the retry above re-drives it instead of
+      // abandoning it past the cursor (truncate would then lose it).
+      storedAll = false;
       continue;
     }
     applied += 1;
   }
-  if (events.length) store.setMeta(PULL_CURSOR_KEY, String(cursor));
+  if (events.length && storedAll) store.setMeta(PULL_CURSOR_KEY, String(cursor));
   return applied;
 }
 
