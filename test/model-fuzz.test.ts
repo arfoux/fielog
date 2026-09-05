@@ -1,0 +1,167 @@
+// model-fuzz: in-memory oracle vs kernel over 5000 seeded mixed ops.
+// ops (applied identically to both): append bayar, stock.add/sell, undo,
+// kill-respawn, sync, replay. state compared every 100 steps: per-oleh live
+// sums + stock qty per item + full voided id set vs SELECT SUM/voided.
+// mismatch fails loudly with seed + step + op log. MemoryRelay only.
+import { describe, it } from 'bun:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createKernel, type Kernel } from '../src/kernel.ts';
+import { MemoryRelay } from '../src/sync.ts';
+import { mulberry32 } from '../src/relay.ts';
+
+// oracle: plain-arithmetic mirror of store.ts routing (bayar/stock/undo only).
+class Oracle {
+  pay = new Map<string, number>(); // oleh -> live nominal sum
+  nom = new Map<string, number>(); // bayar id -> nominal
+  who = new Map<string, string>(); // bayar id -> oleh
+  stk = new Map<string, number>(); // item -> qty on hand
+  mov = new Map<string, { i: string; q: number }>(); // live stock move -> signed qty
+  void = new Set<string>(); // voided bayar + stock ids (oversell parks included)
+  pend = new Set<string>(); // undo targets not yet seen (records-parked)
+  bayar(id: string, n: number, o: string): void {
+    this.nom.set(id, n); this.who.set(id, o);
+    if (this.pend.has(id)) { this.void.add(id); this.pend.delete(id); return; }
+    this.pay.set(o, (this.pay.get(o) ?? 0) + n);
+  }
+  add(id: string, item: string, q: number): void {
+    if (this.pend.has(id)) { this.pend.delete(id); this.void.add(id); return; }
+    this.stk.set(item, (this.stk.get(item) ?? 0) + q);
+    this.mov.set(id, { i: item, q });
+  }
+  sell(id: string, item: string, q: number): void {
+    if ((this.stk.get(item) ?? 0) < q) { this.void.add(id); return; } // oversell park
+    if (this.pend.has(id)) { this.pend.delete(id); this.void.add(id); return; }
+    this.stk.set(item, (this.stk.get(item) ?? 0) - q);
+    this.mov.set(id, { i: item, q: -q });
+  }
+  undo(t: string): void {
+    if (this.nom.has(t) && !this.void.has(t)) {
+      const o = this.who.get(t) as string;
+      this.pay.set(o, (this.pay.get(o) ?? 0) - (this.nom.get(t) as number));
+      this.void.add(t); return;
+    }
+    const m = this.mov.get(t);
+    if (m) { this.stk.set(m.i, (this.stk.get(m.i) ?? 0) - m.q); this.mov.delete(t); this.void.add(t); return; }
+    if (!this.nom.has(t) && !this.void.has(t)) this.pend.add(t); // unknown -> park
+  }
+}
+
+const STEPS = 5000;
+const CHECK_EVERY = 100;
+const OLEH = ['kasir-a', 'kasir-b', 'kasir-c'];
+const ITEMS = ['kopi', 'gula', 'susu'];
+
+function norm(m: Map<string, number>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [k, v] of m) if (v !== 0) out.set(k, v);
+  return out;
+}
+
+async function check(seed: number, step: number, op: string, k: Kernel, o: Oracle, log: string[]): Promise<void> {
+  const ctx = `seed=${seed} step=${step} op=${op}`;
+  const payRows = await k.query<{ oleh: string; t: number }>(
+    `SELECT oleh, SUM(nominal) AS t FROM bayar WHERE voided = 0 GROUP BY oleh`);
+  const pay = new Map(payRows.map((r) => [String(r.oleh), Number(r.t)] as [string, number]));
+  const stockRows = await k.query<{ item: string; qty: number }>(`SELECT item, qty FROM stock`);
+  const stk = new Map(stockRows.map((r) => [String(r.item), Number(r.qty)] as [string, number]));
+  const voidRows = await k.query<{ event_id: string }>(
+    `SELECT event_id FROM bayar WHERE voided = 1 UNION ALL SELECT event_id FROM stock_moves WHERE voided = 1`);
+  const tail = log.slice(-80).join('\n');
+  const loud = (what: string, exp: unknown, got: unknown) =>
+    `${ctx} MISMATCH ${what}\nexpected=${JSON.stringify(exp)}\nactual=${JSON.stringify(got)}\n--- last ops ---\n${tail}`;
+  assert.deepEqual(norm(pay), norm(o.pay), loud('per-oleh balances', [...norm(o.pay)], [...norm(pay)]));
+  assert.deepEqual(norm(stk), norm(o.stk), loud('stock balances', [...norm(o.stk)], [...norm(stk)]));
+  assert.deepEqual(new Set(voidRows.map((r) => String(r.event_id))), o.void,
+    loud('voided ids', [...o.void].sort(), voidRows.map((r) => String(r.event_id)).sort()));
+}
+
+async function runFuzz(seed: number): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), 'fielog-modelfuzz-'));
+  const dbPath = join(dir, 'kasir.db');
+  const relay = new MemoryRelay();
+  let k: Kernel = await createKernel({ file: dbPath });
+  const o = new Oracle();
+  const known: string[] = [];
+  const log: string[] = [];
+  const rng = mulberry32(seed >>> 0);
+  let ackFloor = 0;
+  const pick = <T>(xs: T[]): T => xs[Math.floor(rng() * xs.length)];
+  try {
+    for (let step = 0; step < STEPS; step++) {
+      const r = rng();
+      let op = '';
+      if (r < 0.4 || known.length === 0) {
+        const nominal = 100 + Math.floor(rng() * 4900);
+        const oleh = pick(OLEH);
+        const ev = await k.append({ type: 'bayar', nominal, oleh });
+        o.bayar(ev.id, nominal, oleh);
+        known.push(ev.id);
+        op = `bayar ${ev.id} nominal=${nominal} oleh=${oleh}`;
+      } else if (r < 0.52) {
+        const item = pick(ITEMS);
+        const qty = 1 + Math.floor(rng() * 20);
+        const ev = await k.append({ type: 'stock.add', item, qty });
+        o.add(ev.id, item, qty);
+        known.push(ev.id);
+        op = `stock.add ${ev.id} item=${item} qty=${qty}`;
+      } else if (r < 0.62) {
+        const item = pick(ITEMS);
+        const qty = 1 + Math.floor(rng() * 10);
+        const ev = await k.append({ type: 'stock.sell', item, qty });
+        o.sell(ev.id, item, qty);
+        known.push(ev.id);
+        op = `stock.sell ${ev.id} item=${item} qty=${qty}`;
+      } else if (r < 0.74) {
+        const target = rng() < 0.1 ? `no-such-${Math.floor(rng() * 1e9)}` : pick(known);
+        await k.undo(target, 'fuzz');
+        o.undo(target);
+        op = `undo reverses=${target}`;
+      } else if (r < 0.88) {
+        const chunkSize = 1 + Math.floor(rng() * 20);
+        await k.sync(relay, { chunkSize, maxRetries: 5, baseMs: 1, maxMs: 10 });
+        assert.ok(k.ackSeq() >= ackFloor, `seed=${seed} step=${step}: ack regressed`);
+        ackFloor = k.ackSeq();
+        op = `sync chunk=${chunkSize} ack=${ackFloor}`;
+      } else if (r < 0.895) {
+        const before = k.ackSeq();
+        k.close();
+        k = await createKernel({ file: dbPath });
+        assert.equal(k.ackSeq(), before, `seed=${seed} step=${step}: ack lost on respawn`);
+        op = `kill-respawn ack=${before}`;
+      } else if (r < 0.91) {
+        k.close();
+        k = await createKernel({ file: dbPath });
+        assert.equal(k.verifyLog().ok, true, `seed=${seed} step=${step}: log not clean after replay`);
+        op = `replay events=${k.health().events}`;
+      } else {
+        const chunkSize = 1 + Math.floor(rng() * 20);
+        await k.sync(relay, { chunkSize, maxRetries: 5, baseMs: 1, maxMs: 10 });
+        ackFloor = k.ackSeq();
+        op = `sync chunk=${chunkSize} ack=${ackFloor}`;
+      }
+      log.push(`${step}: ${op}`);
+      if ((step + 1) % CHECK_EVERY === 0) await check(seed, step, op, k, o, log);
+    }
+    await k.sync(relay, { chunkSize: 50, maxRetries: 20, baseMs: 1, maxMs: 10 });
+    log.push(`final: sync ack=${k.ackSeq()}`);
+    await check(seed, STEPS, 'final', k, o, log);
+    assert.equal(k.ackSeq(), k.health().events, `seed=${seed}: unconverged tail`);
+  } catch (err) {
+    const tail = log.slice(-80).join('\n');
+    throw new Error(`model-fuzz seed=${seed} failed: ${(err as Error).message}\n--- op log (last 80) ---\n${tail}`, { cause: err });
+  } finally {
+    k.close();
+  }
+}
+
+describe('model-fuzz', () => {
+  it('seed 20260906: oracle matches kernel over 5000 mixed ops', () => runFuzz(20260906), 120_000);
+  it('unseeded: oracle matches kernel over 5000 mixed ops', () => {
+    const seed = (Date.now() ^ ((Math.random() * 2 ** 31) >>> 0)) >>> 0;
+    console.log(`[model-fuzz] unseeded run seed=${seed}`);
+    return runFuzz(seed);
+  }, 120_000);
+});
