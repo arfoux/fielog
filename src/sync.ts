@@ -55,11 +55,64 @@ export async function withBackoff<T>(fn: () => Promise<T>, opts: SyncOpts = {}):
   }
 }
 
-export interface PushResult {
-  pushed: number;
-  acked: number;
-  serverTime: number | null;
+/** Per-chunk ack handling shared by pushPending and failover push. */
+function applyPushAck(
+  store: EventStore,
+  batch: LogEvent[],
+  ack: PushAck,
+  cursor: number,
+): { advanced: number; acked: number } {
+  // Relay is idempotent by UUID: only advance over events it actually acked,
+  // in log order, so a partial ack resumes exactly where it stopped.
+  const ackedSet = new Set(ack.acked);
+  let advanced = cursor;
+  let acked = 0;
+  for (const ev of batch) {
+    if (!ackedSet.has(ev.id)) break;
+    advanced = ev.seq;
+    acked += 1;
+  }
+  store.setMeta(ACK_SEQ_KEY, String(advanced));
+  store.setMeta(SERVER_TIME_KEY, String(ack.server_time));
+  for (const ev of batch) {
+    if (!ackedSet.has(ev.id)) continue;
+    const local = store.getEventById(ev.id);
+    if (local && local.server_time === undefined) {
+      // Authoritative time only arrives via server ack — stamp it, never the clock.
+      store.query(`UPDATE _events SET server_time = $t WHERE id = $id`, { t: ack.server_time, id: ev.id });
+    }
+  }
+  return { advanced, acked };
 }
+
+/** Per-chunk pull handling shared by pullRemote and failover pull. */
+function applyPullEvents(
+  log: AppendLog,
+  store: EventStore,
+  deviceId: string,
+  events: LogEvent[],
+  cursor: number,
+): number {
+  let applied = 0;
+  for (const remote of events) {
+    if (store.hasId(remote.id)) continue; // idempotent by UUID
+    const ev = log.append({
+      type: remote.type,
+      payload: remote.payload,
+      actor: remote.actor,
+      device_id: deviceId,
+      id: remote.id,
+      ts_device: remote.ts_device, // origin stamp kept as display metadata; order stays local
+      origin_seq: remote.seq,
+      origin_device: remote.device_id,
+    });
+    store.apply(ev);
+    applied += 1;
+  }
+  if (events.length) store.setMeta(PULL_CURSOR_KEY, String(cursor));
+  return applied;
+}
+
 
 /** Push pending events (seq > ack cursor) in chunks; cursor persists per chunk. */
 export async function pushPending(
@@ -78,27 +131,10 @@ export async function pushPending(
     const batch = log.readAfter(cursor).slice(0, chunkSize);
     if (batch.length === 0) break;
     const ack = await withBackoff(() => relay.push(batch), opts);
-    // Relay is idempotent by UUID: only advance over events it actually acked,
-    // in log order, so a partial ack resumes exactly where it stopped.
-    const ackedSet = new Set(ack.acked);
-    let advanced = cursor;
-    for (const ev of batch) {
-      if (!ackedSet.has(ev.id)) break;
-      advanced = ev.seq;
-      acked += 1;
-    }
+    const { advanced, acked: n } = applyPushAck(store, batch, ack, cursor);
+    acked += n;
     pushed += batch.length;
     serverTime = ack.server_time;
-    store.setMeta(ACK_SEQ_KEY, String(advanced));
-    store.setMeta(SERVER_TIME_KEY, String(ack.server_time));
-    for (const ev of batch) {
-      if (!ackedSet.has(ev.id)) continue;
-      const local = store.getEventById(ev.id);
-      if (local && local.server_time === undefined) {
-        // Authoritative time only arrives via server ack — stamp it, never the clock.
-        store.query(`UPDATE _events SET server_time = $t WHERE id = $id`, { t: ack.server_time, id: ev.id });
-      }
-    }
     cursor = advanced;
     if (advanced < batch[batch.length - 1].seq) break; // partial ack: stop, resume next run
   }
@@ -120,23 +156,7 @@ export async function pullRemote(
 ): Promise<PullResult> {
   const since = Number(store.getMeta(PULL_CURSOR_KEY) ?? 0);
   const { events, cursor } = await withBackoff(() => relay.pull(since), opts);
-  let applied = 0;
-  for (const remote of events) {
-    if (store.hasId(remote.id)) continue; // idempotent by UUID
-    const ev = log.append({
-      type: remote.type,
-      payload: remote.payload,
-      actor: remote.actor,
-      device_id: deviceId,
-      id: remote.id,
-      ts_device: remote.ts_device, // origin stamp kept as display metadata; order stays local
-      origin_seq: remote.seq,
-      origin_device: remote.device_id,
-    });
-    store.apply(ev);
-    applied += 1;
-  }
-  if (events.length) store.setMeta(PULL_CURSOR_KEY, String(cursor));
+  const applied = applyPullEvents(log, store, deviceId, events, cursor);
   return { pulled: events.length, applied };
 }
 
@@ -150,6 +170,159 @@ export async function syncKernel(
   const push = await pushPending(log, store, relay, opts);
   const pull = await pullRemote(log, store, relay, deviceId, opts);
   return { ...push, ...pull };
+}
+// Relay failover: try relays in list order per chunk, stick to the first
+// healthy one, park failures on backoff and re-probe them later. A chunk is
+// always served by exactly one relay; cursors stay per-chunk so resume is
+// exact-once by UUID like the single-relay path.
+export interface FailoverState {
+  fails: number[];
+  notBefore: number[];
+}
+
+export function createFailoverState(n: number): FailoverState {
+  return { fails: Array(n).fill(0), notBefore: Array(n).fill(0) };
+}
+
+export interface FailoverResult extends PushResult, PullResult {
+  /** Index of the relay that served the last push chunk (-1 when nothing pushed). */
+  pushRelay: number;
+  /** Index of the relay that served the pull (-1 when pull never succeeded). */
+  pullRelay: number;
+}
+
+function failoverNoteFailure(state: FailoverState, i: number, opts: SyncOpts): void {
+  state.fails[i] += 1;
+  state.notBefore[i] = Date.now() + backoffMs(state.fails[i] - 1, opts.baseMs ?? 200, opts.maxMs ?? 30_000);
+}
+
+/** List order first, relays still on backoff last (re-probed once cooled down). */
+function failoverOrder(n: number, state: FailoverState, now: number): number[] {
+  const fresh: number[] = [];
+  const cooling: number[] = [];
+  for (let i = 0; i < n; i++) (now < state.notBefore[i] ? cooling : fresh).push(i);
+  return [...fresh, ...cooling];
+}
+
+async function failoverPushOne(
+  log: AppendLog,
+  store: EventStore,
+  relays: Relay[],
+  batch: LogEvent[],
+  cursor: number,
+  opts: SyncOpts,
+  state: FailoverState,
+): Promise<{ advanced: number; acked: number; serverTime: number; relay: number }> {
+  const maxPasses = (opts.maxRetries ?? 5) + 1;
+  let lastErr: unknown = null;
+  for (let pass = 0; pass < maxPasses; pass++) {
+    let skipped = 0;
+    for (const i of failoverOrder(relays.length, state, Date.now())) {
+      if (Date.now() < state.notBefore[i]) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        const ack = await relays[i].push(batch);
+        const { advanced, acked } = applyPushAck(store, batch, ack, cursor);
+        state.fails[i] = 0;
+        state.notBefore[i] = 0;
+        return { advanced, acked, serverTime: ack.server_time, relay: i };
+      } catch (err) {
+        lastErr = err;
+        failoverNoteFailure(state, i, opts);
+      }
+    }
+    if (pass + 1 >= maxPasses) break;
+    // All failed or still cooling: wait out the shortest backoff, then re-probe.
+    const wait = skipped > 0
+      ? Math.max(0, Math.min(...state.notBefore) - Date.now())
+      : backoffMs(pass, opts.baseMs ?? 200, opts.maxMs ?? 30_000);
+    if (wait > 0) {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setTimeout(resolve, wait);
+      await promise;
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(`all ${relays.length} relays failed`);
+}
+
+export async function syncWithFailover(
+  log: AppendLog,
+  store: EventStore,
+  relays: Relay[],
+  deviceId: string,
+  opts: SyncOpts = {},
+  state?: FailoverState,
+): Promise<FailoverResult> {
+  if (relays.length === 0) throw new Error('sync needs at least one relay');
+  const st = state ?? createFailoverState(relays.length);
+  while (st.fails.length < relays.length) {
+    st.fails.push(0);
+    st.notBefore.push(0);
+  }
+  const chunkSize = opts.chunkSize ?? 10;
+  let cursor = getAckSeq(store);
+  let pushed = 0;
+  let acked = 0;
+  let serverTime: number | null = getServerTime(store);
+  let pushRelay = -1;
+
+  for (;;) {
+    const batch = log.readAfter(cursor).slice(0, chunkSize);
+    if (batch.length === 0) break;
+    const one = await failoverPushOne(log, store, relays, batch, cursor, opts, st);
+    pushed += batch.length;
+    acked += one.acked;
+    serverTime = one.serverTime;
+    cursor = one.advanced;
+    pushRelay = one.relay;
+    if (one.advanced < batch[batch.length - 1].seq) break; // partial ack: stop, resume next run
+  }
+
+  // Pull from the first healthy relay in list order; own events echo back
+  // but apply stays idempotent by UUID.
+  const since = Number(store.getMeta(PULL_CURSOR_KEY) ?? 0);
+  let pullRelay = -1;
+  let pulled = 0;
+  let applied = 0;
+  const maxPasses = (opts.maxRetries ?? 5) + 1;
+  let lastErr: unknown = null;
+  for (let pass = 0; pass < maxPasses; pass++) {
+    let skipped = 0;
+    let done = false;
+    for (const i of failoverOrder(relays.length, st, Date.now())) {
+      if (Date.now() < st.notBefore[i]) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        const res = await relays[i].pull(since);
+        applied = applyPullEvents(log, store, deviceId, res.events, res.cursor);
+        pulled = res.events.length;
+        pullRelay = i;
+        st.fails[i] = 0;
+        st.notBefore[i] = 0;
+        done = true;
+        break;
+      } catch (err) {
+        lastErr = err;
+        failoverNoteFailure(st, i, opts);
+      }
+    }
+    if (done) break;
+    if (pass + 1 >= maxPasses) break;
+    const wait = skipped > 0
+      ? Math.max(0, Math.min(...st.notBefore) - Date.now())
+      : backoffMs(pass, opts.baseMs ?? 200, opts.maxMs ?? 30_000);
+    if (wait > 0) {
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setTimeout(resolve, wait);
+      await promise;
+    }
+  }
+  if (pullRelay < 0) throw lastErr instanceof Error ? lastErr : new Error(`all ${relays.length} relays failed`);
+  return { pushed, acked, serverTime, pulled, applied, pushRelay, pullRelay };
 }
 
 // In-memory relay for tests and local dev. Replaceable in ~50 lines.

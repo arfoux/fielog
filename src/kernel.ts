@@ -5,9 +5,12 @@ import { randomUUID } from 'node:crypto';
 import { openLog, type AppendLog, type AppendInput, type LogEvent } from './log.js';
 import { checkAppend, openStore, type EventStore, type SqlParams } from './store.js';
 import {
+  createFailoverState,
   getAckSeq,
   getServerTime,
   syncKernel as runSync,
+  syncWithFailover,
+  type FailoverState,
   type PushResult,
   type PullResult,
   type Relay,
@@ -21,7 +24,12 @@ export interface KernelOpts {
   deviceId?: string;
   /** Wall-clock source for ts_device (display only, never order). Test seam for skew. */
   clock?: () => number;
+  /** Max locally queued events awaiting ack (default 50_000). Append past it throws ERR_OUTBOX_FULL. */
+  maxPending?: number;
 }
+
+/** Default bound on unsynced outbox events before append refuses with ERR_OUTBOX_FULL. */
+export const DEFAULT_OUTBOX_CAP = 50_000;
 
 export type AppendArgs =
   | { type: string; payload: Record<string, unknown>; actor?: string }
@@ -55,7 +63,8 @@ export interface Kernel {
   undo(eventId: string, actor?: string): Promise<LogEvent>;
   /** Settle an IOU: 'settled' needs online ack; failed/expired record locally. */
   settle(eventId: string, outcome: 'settled' | 'failed' | 'expired', actor?: string): Promise<LogEvent>;
-  sync(relay: Relay, opts?: SyncOpts): Promise<PushResult & PullResult>;
+  /** Sync via one relay, or fail over across a list in order (sticks to first healthy). */
+  sync(relay: Relay | Relay[], opts?: SyncOpts): Promise<PushResult & PullResult & { pushRelay?: number; pullRelay?: number }>;
   /** Mint a relay capability token for this kernel's deviceId with a device private key. */
   capToken(privateKeyPem: string, scopes?: string[], ttlMs?: number): CapToken;
   conflicts(): Promise<Record<string, unknown>[]>;
@@ -105,9 +114,23 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
   );
 
   const clock = opts.clock ?? Date.now;
+  const maxPending = opts.maxPending ?? DEFAULT_OUTBOX_CAP;
+  if (!Number.isInteger(maxPending) || maxPending < 1) {
+    throw new Error(`maxPending must be a positive integer, got ${opts.maxPending}`);
+  }
+  // Failover memory across sync calls: failed relays cool down with backoff,
+  // then get re-probed; list order decides fail-back.
+  const failover: FailoverState = createFailoverState(0);
   async function append(args: AppendArgs): Promise<LogEvent> {
     const input = toAppendInput(args, deviceId, clock);
     checkAppend(input.type, input.payload ?? {}); // fail fast: no poison lines in the log
+    const pending = log.maxSeq() - getAckSeq(store);
+    if (pending >= maxPending) {
+      throw new Error(
+        `ERR_OUTBOX_FULL: outbox holds ${pending} pending events (cap ${maxPending}); ` +
+          `oldest unsynced seq is ${getAckSeq(store) + 1}; sync to drain before appending`,
+      );
+    }
     const ev = log.append(input);
     store.apply(ev);
     return ev;
@@ -126,10 +149,15 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
       return append({ type, payload: { event_id: eventId }, actor });
     },
     sync: (relay, syncOpts) => {
-      if (typeof relay === 'string' || !relay || typeof (relay as Relay).push !== 'function') {
+      const relays = Array.isArray(relay) ? relay : [relay];
+      if (
+        relays.length === 0 ||
+        relays.some((r) => !r || typeof (r as Relay).push !== 'function' || typeof (r as Relay).pull !== 'function')
+      ) {
         throw new Error('sync needs a Relay object (push/pull) — raw URLs carry no transport in v0.1');
       }
-      return runSync(log, store, relay as Relay, deviceId, syncOpts);
+      if (!Array.isArray(relay)) return runSync(log, store, relay as Relay, deviceId, syncOpts);
+      return syncWithFailover(log, store, relays as Relay[], deviceId, syncOpts, failover);
     },
     capToken: (privateKeyPem, scopes = ['relay:push', 'relay:pull'], ttlMs = 3600 * 1000) =>
       mintCapToken(privateKeyPem, deviceId, scopes, ttlMs),
