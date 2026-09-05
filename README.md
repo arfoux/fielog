@@ -9,7 +9,7 @@ blackout: append-only log (source of truth) + SQLite read-model + sync-later.
 
 ```js
 // example/kasir.mjs — runs with: bun example/kasir.mjs
-import { createKernel, MemoryRelay } from '../dist/index.js';
+import { createKernel, MemoryRelay } from '../src/index.ts';
 const k = await createKernel({ file: 'kasir.db' });
 const tx = await k.append({ type: 'bayar', nominal: 50000, oleh: 'budi' });
 console.log(await k.query('SELECT sum(nominal) AS total FROM bayar WHERE voided = 0'));
