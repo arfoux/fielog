@@ -14,6 +14,9 @@ bun add fielog
 
 Requires `bun` (>= 1.0) at runtime — `kernel` and `WsRelayServer` use `bun:sqlite` and `Bun.serve`.
 CLI: `bunx fielog demo` or `bun bin/fielog.ts demo`.
+CLI serve/sync default mode tanda: serve butuh `--trust <id=pub.pem>`
+(ulang per device), sync butuh `--key <priv.pem> --as <device>`.
+`--unsigned` relay terbuka hanya untuk dev lokal, bukan produksi.
 
 ## Quickstart
 

@@ -8,7 +8,7 @@
 //   bun bin/fielog.ts sync --file ./kasir.db --relay ws://127.0.0.1:8091 --key ./kasir.priv --as kasir
 //   bun bin/fielog.ts serve --port 8091 --file ./relay.log --unsigned
 //   bun bin/fielog.ts demo
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createKernel, generateDeviceKey, WsRelayClient, WsRelayServer } from '../src/index.ts';
@@ -39,8 +39,9 @@ function argAll(args: string[], name: string): string[] {
 }
 
 function die(msg: string): never {
-  console.error(msg);
-  console.error(usage());
+  // tulis sinkron: console.error + process.exit balap saat stderr pipe
+  // (test cli-auth baca stderr anak proses, tulis async bisa hilang).
+  writeSync(2, msg + '\n' + usage() + '\n');
   process.exit(2);
 }
 
