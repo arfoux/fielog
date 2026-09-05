@@ -208,6 +208,98 @@ export function openStore(path: string): EventStore {
     }
   }
 
+  // Reorder resurrection: an undo/transition that arrived before its target
+  // parks in records (undo) or conflicts (unknown-payment). When the target
+  // lands later, re-resolve here so voided/state converge regardless of order.
+  function resolvePendingUndos(target: string): void {
+    const rows = all<{ event_id: string; body: string }>(
+      db,
+      `SELECT event_id, body FROM records WHERE type = 'undo.compensate'`,
+    );
+    for (const r of rows) {
+      let reverses = '';
+      try {
+        reverses = String((JSON.parse(r.body) as Record<string, unknown>)['reverses'] ?? '');
+      } catch {
+        continue;
+      }
+      if (reverses !== target) continue;
+      const b = all<{ seq: number }>(db, `SELECT seq FROM bayar WHERE event_id = ?`, target);
+      if (b.length) {
+        run(db, `UPDATE bayar SET voided = 1 WHERE event_id = ?`, target);
+        continue;
+      }
+      const m = all<{ item: string; qty: number; voided: number }>(
+        db,
+        `SELECT item, qty, voided FROM stock_moves WHERE event_id = ?`,
+        target,
+      );
+      if (m.length && !m[0].voided) {
+        run(db, `UPDATE stock_moves SET voided = 1 WHERE event_id = ?`, target);
+        run(
+          db,
+          `INSERT INTO stock(item,qty) VALUES(?,?)
+           ON CONFLICT(item) DO UPDATE SET qty = stock.qty + excluded.qty`,
+          m[0].item,
+          -m[0].qty,
+        );
+      }
+    }
+  }
+
+  function resolvePendingPayments(target: string): void {
+    const open = all<{ id: string; event_ids: string }>(
+      db,
+      `SELECT id, event_ids FROM conflicts WHERE kind = 'unknown-payment' AND status = 'open'`,
+    );
+    const cands: Array<{ id: string; type: string; seq: number; conflictId: string }> = [];
+    for (const c of open) {
+      let ids: string[] = [];
+      try {
+        ids = JSON.parse(c.event_ids) as string[];
+      } catch {
+        continue;
+      }
+      for (const tid of ids) {
+        const er = all<{ type: string; seq: number; payload: string }>(
+          db,
+          `SELECT type, seq, payload FROM _events WHERE id = ?`,
+          tid,
+        );
+        if (!er.length) continue;
+        let pp: Record<string, unknown> = {};
+        try {
+          pp = JSON.parse(er[0].payload) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+        if (String(pp['event_id'] ?? pp['reverses'] ?? '') !== target) continue;
+        cands.push({ id: tid, type: er[0].type, seq: er[0].seq, conflictId: c.id });
+      }
+    }
+    cands.sort((a, b) => a.seq - b.seq);
+    for (const t of cands) {
+      const rows = all<{ state: string }>(db, `SELECT state FROM bayar WHERE event_id = ?`, target);
+      if (!rows.length) continue;
+      if (TERMINAL_STATES[rows[0].state]) {
+        // Target landed terminal already: morph into a double-settle for humans.
+        run(db, `UPDATE conflicts SET kind = 'double-settle', detail = ?, event_ids = ? WHERE id = ?`,
+          `${t.type} on already-terminal payment ${target} (${rows[0].state})`,
+          JSON.stringify([target, t.id]),
+          t.conflictId);
+        continue;
+      }
+      const next =
+        t.type === 'payment.settled'
+          ? MoneyState.SETTLED_ONLINE
+          : t.type === 'payment.failed'
+            ? MoneyState.FAILED
+            : MoneyState.EXPIRED;
+      run(db, `UPDATE bayar SET state = ? WHERE event_id = ?`, next, target);
+      run(db, `UPDATE conflicts SET status = 'resolved' WHERE id = ?`, t.conflictId);
+    }
+  }
+
   function route(ev: LogEvent): void {
     const p = ev.payload as Record<string, unknown>;
     switch (ev.type) {
@@ -224,6 +316,9 @@ export function openStore(path: string): EventStore {
           (p['oleh'] as string) ?? (ev.actor as string) ?? null,
           state,
         );
+        // Target landed after its undo/transition parked: resurrect them now.
+        resolvePendingUndos(ev.id);
+        resolvePendingPayments(ev.id);
         break;
       }
       case 'payment.settled':
@@ -269,6 +364,7 @@ export function openStore(path: string): EventStore {
           qty,
         );
         run(db, `INSERT INTO stock_moves(seq,event_id,item,qty,voided) VALUES(?,?,?, ?,0)`, ev.seq, ev.id, item, qty);
+        resolvePendingUndos(ev.id);
         break;
       }
       case 'stock.sell': {
@@ -289,6 +385,7 @@ export function openStore(path: string): EventStore {
           run(db, `UPDATE stock SET qty = qty - ? WHERE item = ?`, qty, item);
           run(db, `INSERT INTO stock_moves(seq,event_id,item,qty,voided) VALUES(?,?,?, ?,0)`, ev.seq, ev.id, item, -qty);
         }
+        resolvePendingUndos(ev.id);
         break;
       }
       case 'undo.compensate': {
