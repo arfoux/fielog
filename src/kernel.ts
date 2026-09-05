@@ -13,6 +13,7 @@ import {
   type Relay,
   type SyncOpts,
 } from './sync.js';
+import { takeSnapshot, sweepLogFile } from './retain.js';
 
 export interface KernelOpts {
   file: string; // e.g. 'kasir.db' (+ sidecar 'kasir.log')
@@ -32,6 +33,18 @@ export interface LogHealth {
   gaps: number[];
 }
 
+export interface SnapshotInfo {
+  snapshot: string;
+  sealedSeq: number;
+  dbSeq: number;
+}
+
+export interface TruncateInfo {
+  removed: number;
+  kept: number;
+  sealedSeq: number;
+}
+
 export interface Kernel {
   deviceId: string;
   dbPath: string;
@@ -47,9 +60,12 @@ export interface Kernel {
   serverTime(): number | null;
   verifyLog(): { ok: boolean; at?: number; reason?: string; gaps?: number[] };
   health(): LogHealth;
+  /** Online full copy of the db + seal the acked prefix into it. */
+  snapshot(dest?: string): Promise<SnapshotInfo>;
+  /** Sweep the sealed prefix from the log (atomic file cutover). No-op when unsealed. */
+  truncate(): Promise<TruncateInfo>;
   close(): void;
 }
-
 export function logPathFor(file: string): string {
   return file.replace(/\.(db|sqlite|sqlite3)$/, '') + '.log';
 }
@@ -76,10 +92,14 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
   const store: EventStore = openStore(dbPath);
   const deviceId: string = opts.deviceId ?? store.getMeta('device.id') ?? randomUUID();
   if (!store.getMeta('device.id')) store.setMeta('device.id', deviceId);
-  const log: AppendLog = openLog(logPath, deviceId);
-
-  // Crash recovery: replay the log into the read-model (idempotent by UUID).
+  let log: AppendLog = openLog(logPath, deviceId);
+  // Crash recovery: replay the log into the read-model (idempotent by UUID),
+  // then excise rows the log no longer carries (quarantined, never swept).
   store.replay(log.readAll());
+  store.exciseMissing(
+    log.readAll().map((e) => e.seq),
+    log.sealedBelow,
+  );
 
   const clock = opts.clock ?? Date.now;
   async function append(args: AppendArgs): Promise<LogEvent> {
@@ -116,6 +136,21 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
       const v = log.verify();
       return { events: log.readAll().length, quarantined: log.quarantined, repairedTail: log.repairedTail, gaps: v.gaps ?? [] };
     },
+    snapshot: (dest) => Promise.resolve(takeSnapshot(store, dbPath, getAckSeq(store), dest)),
+    truncate: () =>
+      Promise.resolve().then(() => {
+        const sealed = Number(store.getMeta('snapshot.sealed_seq') ?? 0);
+        if (sealed <= 0) return { removed: 0, kept: log.readAll().length, sealedSeq: 0 };
+        log.close();
+        const res = sweepLogFile(logPath, sealed);
+        log = openLog(logPath, deviceId);
+        store.replay(log.readAll()); // incremental: kept suffix re-applies, db stands
+        store.exciseMissing(
+          log.readAll().map((e) => e.seq),
+          log.sealedBelow,
+        );
+        return res;
+      }),
     close: () => {
       log.close();
       store.close();

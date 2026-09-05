@@ -147,8 +147,16 @@ CREATE TABLE IF NOT EXISTS records(
 
 export interface EventStore {
   apply(ev: LogEvent): void;
+  /** Catch-up apply of events missing locally; never deletes (truncate-safe). */
   replay(events: LogEvent[]): void;
+  /**
+   * Delete read-model rows for seqs the log no longer carries (quarantined),
+   * forgiving the swept prefix below `forgiveBelow`. Returns excised count.
+   */
+  exciseMissing(kept: number[], forgiveBelow: number): number;
   query<T = Record<string, unknown>>(sql: string, params?: SqlParams): T[];
+  /** Raw DDL/admin (VACUUM INTO for snapshots). No placeholder support. */
+  exec(sql: string): void;
   getEventById(id: string): LogEvent | null;
   hasId(id: string): boolean;
   getMeta(k: string): string | null;
@@ -323,11 +331,38 @@ export function openStore(path: string): EventStore {
       route(ev);
     },
     replay(events: LogEvent[]): void {
-      db.exec('DELETE FROM _events; DELETE FROM bayar; DELETE FROM stock; DELETE FROM stock_moves; DELETE FROM conflicts; DELETE FROM records;');
+      // Incremental only: the store can hold events the log no longer carries
+      // (post-truncate). Clearing here would wipe a healthy read-model.
       for (const ev of [...events].sort((a, b) => a.seq - b.seq)) {
         if (!insertRaw(ev)) continue;
         route(ev);
       }
+    },
+    exciseMissing(kept: number[], forgiveBelow: number): number {
+      const have = new Set(kept);
+      const rows = all<{ seq: number; id: string }>(db, `SELECT seq, id FROM _events`);
+      const gone = rows.filter((r) => !have.has(r.seq) && r.seq >= forgiveBelow);
+      let moves = 0;
+      for (const g of gone) {
+        run(db, `DELETE FROM bayar WHERE event_id = ?`, g.id);
+        const m = all<{ n: number }>(db, `SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = ?`, g.id);
+        if (m[0]?.n) moves += 1;
+        run(db, `DELETE FROM stock_moves WHERE event_id = ?`, g.id);
+        run(db, `DELETE FROM records WHERE event_id = ?`, g.id);
+        run(db, `DELETE FROM _events WHERE id = ?`, g.id);
+      }
+      if (moves > 0) {
+        // Balances derive from moves: rebuild so excised stock stops counting.
+        db.exec('DELETE FROM stock');
+        run(
+          db,
+          `INSERT INTO stock(item, qty) SELECT item, SUM(qty) FROM stock_moves WHERE voided = 0 GROUP BY item`,
+        );
+      }
+      return gone.length;
+    },
+    exec(sql: string): void {
+      db.exec(sql);
     },
     query<T = Record<string, unknown>>(sql: string, params?: SqlParams): T[] {
       const stmt = db.prepare(sql);

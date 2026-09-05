@@ -16,6 +16,27 @@ import { dirname } from 'node:path';
 
 export const GENESIS_HASH = 'GENESIS';
 
+/** First line of a swept log: chains the kept suffix to the removed prefix. */
+export interface TruncateMarker {
+  v: 1;
+  marker: 'fielog-truncate';
+  truncated_before: number; // first kept seq; removed seqs are all below this
+  tip: string; // hash of the last removed event; verify base for the suffix
+  next_seq: number; // seq counter at sweep time; never reuse a seq
+}
+export function isMarker(o: unknown): o is TruncateMarker {
+  if (!o || typeof o !== 'object') return false;
+  if (!('marker' in o) || o.marker !== 'fielog-truncate') return false;
+  return (
+    'tip' in o &&
+    typeof o.tip === 'string' &&
+    'next_seq' in o &&
+    typeof o.next_seq === 'number' &&
+    'truncated_before' in o &&
+    typeof o.truncated_before === 'number'
+  );
+}
+
 export interface LogEvent {
   id: string; // UUID, idempotency key across devices/relays
   seq: number; // local monotonic sequence, assigned on append
@@ -82,6 +103,8 @@ export interface AppendLog {
   repairedTail: boolean;
   /** mid-file lines skipped into <path>.quarantine. */
   quarantined: number;
+  /** first kept seq after a sweep (0 when never truncated); excise forgives below this. */
+  sealedBelow: number;
   close(): void;
 }
 
@@ -111,6 +134,7 @@ export function openLog(path: string, defaultDeviceId: string): AppendLog {
     appendFileSync(quarantinePath, JSON.stringify({ line: lineNo, sha, raw }) + '\n');
   };
   let events: LogEvent[] = [];
+  let marker: TruncateMarker | null = null;
   const gapBefore = new Set<number>(); // kept seqs following a skipped line
   let skipPending = false;
   let quarantined = 0;
@@ -131,7 +155,13 @@ export function openLog(path: string, defaultDeviceId: string): AppendLog {
       const t = parts[i].trim();
       if (!t) continue;
       try {
-        const ev = JSON.parse(t) as LogEvent;
+        const parsed: unknown = JSON.parse(t);
+        if (isMarker(parsed)) {
+          marker = parsed; // last marker wins; old ones are dropped by sweep
+          skipPending = false;
+          continue;
+        }
+        const ev = parsed as LogEvent;
         if (skipPending) {
           gapBefore.add(ev.seq);
           skipPending = false;
@@ -154,8 +184,9 @@ export function openLog(path: string, defaultDeviceId: string): AppendLog {
       }
     }
   }
-  let nextSeq = events.length === 0 ? 1 : Math.max(...events.map((e) => e.seq)) + 1;
-  let tip = events.length === 0 ? GENESIS_HASH : events[events.length - 1].hash;
+  const keptMax = events.length === 0 ? 0 : Math.max(...events.map((e) => e.seq));
+  let nextSeq = Math.max(marker?.next_seq ?? 1, keptMax + 1); // seqs never reused across sweeps
+  let tip = events.length === 0 ? (marker?.tip ?? GENESIS_HASH) : events[events.length - 1].hash;
 
   // Long-lived append fd so every write can be followed by fsync.
   const fd = openSync(path, 'a');
@@ -200,7 +231,7 @@ export function openLog(path: string, defaultDeviceId: string): AppendLog {
       return tip;
     },
     verify(): VerifyResult {
-      let prev = GENESIS_HASH;
+      let prev = marker?.tip ?? GENESIS_HASH; // swept prefix re-anchors here
       const gaps: number[] = [];
       for (const e of events) {
         const { hash, ...core } = e;
@@ -219,6 +250,7 @@ export function openLog(path: string, defaultDeviceId: string): AppendLog {
     },
     repairedTail,
     quarantined,
+    sealedBelow: marker?.truncated_before ?? 0,
     close(): void {
       try {
         closeSync(fd);

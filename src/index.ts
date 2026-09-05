@@ -22,3 +22,5 @@ export { createKernel, logPathFor } from './kernel.js';
 export type { Kernel, KernelOpts, AppendArgs, LogHealth } from './kernel.js';
 export { WsRelayServer, WsRelayClient, mulberry32 } from './relay.js';
 export type { WsRelayServerOpts, WsRelayClientOpts } from './relay.js';
+export { takeSnapshot, sweepLogFile, snapshotPathFor } from './retain.js';
+export type { SnapshotResult, TruncateResult } from './retain.js';
