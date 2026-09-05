@@ -2,7 +2,7 @@
 // Idempotent by UUID, resumable in chunks, exponential backoff.
 // The relay is dumb: accept raw log, broadcast, store. No business logic.
 import type { AppendLog, LogEvent } from './log.js';
-import type { EventStore } from './store.js';
+import { checkAppend, type EventStore } from './store.js';
 
 export interface PushAck {
   acked: string[]; // event UUIDs accepted
@@ -95,10 +95,22 @@ function applyPullEvents(
 ): number {
   let applied = 0;
   for (const remote of events) {
-    if (store.hasId(remote.id)) continue; // idempotent by UUID
+    // Fail-fast gate (mirrors kernel append): a poison event must never
+    // touch the local log nor pin the pull cursor. Shape + checkAppend run
+    // BEFORE log.append; dead-letters are skipped while the cursor below
+    // still advances past them, so one bad write can never brick sync.
+    if (!remote || typeof remote.id !== 'string' || remote.id === '' || store.hasId(remote.id)) continue;
+    try {
+      if (!remote.type || typeof remote.type !== 'string') throw new Error('pull: event without type');
+      const payload = (remote.payload ?? {}) as Record<string, unknown>;
+      if (typeof payload !== 'object' || payload === null) throw new Error('pull: payload must be an object');
+      checkAppend(remote.type, payload);
+    } catch {
+      continue;
+    }
     const ev = log.append({
       type: remote.type,
-      payload: remote.payload,
+      payload: (remote.payload ?? {}) as Record<string, unknown>,
       actor: remote.actor,
       device_id: deviceId,
       id: remote.id,
@@ -106,7 +118,14 @@ function applyPullEvents(
       origin_seq: remote.seq,
       origin_device: remote.device_id,
     });
-    store.apply(ev);
+    try {
+      store.apply(ev);
+    } catch {
+      // Validated above: only a sqlite-level failure lands here (replay
+      // already treats per-event apply errors the same way). Liveness wins:
+      // the cursor still advances instead of retry-storming this batch.
+      continue;
+    }
     applied += 1;
   }
   if (events.length) store.setMeta(PULL_CURSOR_KEY, String(cursor));
