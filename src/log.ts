@@ -142,15 +142,18 @@ export function openLog(path: string, defaultDeviceId: string): AppendLog {
   if (existsSync(path)) {
     const raw = readFileSync(path, 'utf8');
     const parts = raw.split('\n');
-    // Offsets locate a torn tail for truncation; file ends with '\n' so the
-    // last part is always ''.
+    // Last content line, not assumed position: a kill can land between the
+    // content write and its trailing newline, leaving a complete event with
+    // no terminator. Skipping it would silently drop a durable event.
+    let lastIdx = parts.length - 1;
+    while (lastIdx >= 0 && !parts[lastIdx].trim()) lastIdx--;
+    // Offsets locate a torn tail for truncation.
     let off = 0;
     const starts: number[] = parts.map((p) => {
       const s = off;
       off += Buffer.byteLength(p, 'utf8') + 1;
       return s;
     });
-    const lastIdx = parts.length - 2; // last non-empty line index
     for (let i = 0; i <= lastIdx; i++) {
       const t = parts[i].trim();
       if (!t) continue;

@@ -327,15 +327,46 @@ export function openStore(path: string): EventStore {
 
   const store: EventStore = {
     apply(ev: LogEvent): void {
-      if (!insertRaw(ev)) return; // idempotent by UUID
-      route(ev);
+      // Atomic: _events row + routed rows commit together. A kill between
+      // them used to orphan the UUID and blind replay forever.
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        if (!insertRaw(ev)) {
+          db.exec('ROLLBACK');
+          return; // idempotent by UUID
+        }
+        route(ev);
+        db.exec('COMMIT');
+      } catch (err) {
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          /* already rolled back */
+        }
+        throw err;
+      }
     },
     replay(events: LogEvent[]): void {
       // Incremental only: the store can hold events the log no longer carries
       // (post-truncate). Clearing here would wipe a healthy read-model.
+      // Per-event transaction: one poison event rolls back alone instead of
+      // starving the tail behind it.
       for (const ev of [...events].sort((a, b) => a.seq - b.seq)) {
-        if (!insertRaw(ev)) continue;
-        route(ev);
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          if (!insertRaw(ev)) {
+            db.exec('ROLLBACK');
+            continue;
+          }
+          route(ev);
+          db.exec('COMMIT');
+        } catch {
+          try {
+            db.exec('ROLLBACK');
+          } catch {
+            /* already rolled back */
+          }
+        }
       }
     },
     exciseMissing(kept: number[], forgiveBelow: number): number {
