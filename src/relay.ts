@@ -3,7 +3,9 @@
 // Crash model: the server persists every stored event to a JSONL file BEFORE
 // acking, so kill+restart + client resume from the ack cursor is exact-once
 // by UUID. Live broadcast is a hint only — pull is the source of truth.
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { existsSync, fsyncSync, mkdirSync, openSync, closeSync, readFileSync, writeSync } from 'node:fs';
+import { dirname } from 'node:path';
+import type { Server, ServerWebSocket } from 'bun';
 import type { LogEvent } from './log.js';
 import { backoffMs, type PushAck, type Relay } from './sync.js';
 
@@ -45,9 +47,10 @@ interface SockState {
 export class WsRelayServer {
   private byId = new Map<string, LogEvent>();
   private order: LogEvent[] = [];
-  private server: ReturnType<typeof Bun.serve> | null = null;
-  private sockets = new Set<import('bun').ServerWebSocket<SockState>>();
-  private hbTimer: ReturnType<typeof setInterval> | null = null;
+  private server: Server<SockState> | null = null;
+  private sockets = new Set<ServerWebSocket<SockState>>();
+  private hbTimer: Timer | undefined = undefined;
+  private logFd: number | null = null;
   private rng: () => number;
   serverTime = 1_700_000_000_000;
   pushesReceived = 0;
@@ -62,10 +65,14 @@ export class WsRelayServer {
       for (const line of readFileSync(opts.file, 'utf8').split('\n')) {
         const t = line.trim();
         if (!t) continue;
-        const ev = JSON.parse(t) as LogEvent;
-        if (!this.byId.has(ev.id)) {
-          this.byId.set(ev.id, ev);
-          this.order.push(ev);
+        try {
+          const ev = JSON.parse(t) as LogEvent;
+          if (!this.byId.has(ev.id)) {
+            this.byId.set(ev.id, ev);
+            this.order.push(ev);
+          }
+        } catch {
+          /* corrupt relay line: not an event, skip on reload */
         }
       }
     }
@@ -87,6 +94,11 @@ export class WsRelayServer {
 
   async start(): Promise<number> {
     const self = this;
+    if (this.opts.file) {
+      const dir = dirname(this.opts.file);
+      if (dir !== '' && dir !== '.') mkdirSync(dir, { recursive: true });
+      this.logFd = openSync(this.opts.file, 'a');
+    }
     this.server = Bun.serve<SockState>({
       port: this.opts.port ?? 0,
       fetch(req, server) {
@@ -129,8 +141,8 @@ export class WsRelayServer {
 
   /** Abrupt kill: no graceful close, in-flight requests die unacked. */
   kill(): void {
-    if (this.hbTimer) clearInterval(this.hbTimer);
-    this.hbTimer = null;
+    clearInterval(this.hbTimer);
+    this.hbTimer = undefined;
     for (const ws of [...this.sockets]) {
       try {
         ws.close();
@@ -139,17 +151,28 @@ export class WsRelayServer {
       }
     }
     this.sockets.clear();
+    if (this.logFd !== null) {
+      try {
+        closeSync(this.logFd);
+      } catch {
+        /* gone */
+      }
+      this.logFd = null;
+    }
     this.server?.stop(true);
     this.server = null;
   }
 
   private persist(evs: LogEvent[]): void {
     if (!this.opts.file || evs.length === 0) return;
-    appendFileSync(this.opts.file, evs.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    if (this.logFd === null) return;
+    writeSync(this.logFd, evs.map((e) => JSON.stringify(e)).join('\n') + '\n');
+    fsyncSync(this.logFd); // durable before any ack: restart loses nothing
   }
 
+
   private onMessage(
-    ws: import('bun').ServerWebSocket<SockState>,
+    ws: ServerWebSocket<SockState>,
     raw: string,
   ): void {
     let msg: ToServer;
@@ -210,7 +233,7 @@ export class WsRelayServer {
     return fresh;
   }
 
-  private broadcast(evs: LogEvent[], except: import('bun').ServerWebSocket<SockState>): void {
+  private broadcast(evs: LogEvent[], except: ServerWebSocket<SockState>): void {
     if (evs.length === 0) return;
     const msg = JSON.stringify({ op: 'live', events: evs } satisfies ToClient);
     for (const ws of this.sockets) {
@@ -223,7 +246,7 @@ export class WsRelayServer {
     }
   }
 
-  private send(ws: import('bun').ServerWebSocket<SockState>, msg: ToClient): void {
+  private send(ws: ServerWebSocket<SockState>, msg: ToClient): void {
     ws.send(JSON.stringify(msg));
   }
 }
@@ -238,7 +261,7 @@ export interface WsRelayClientOpts {
 interface Inflight {
   resolve: (m: ToClient) => void;
   reject: (e: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
+  timer: Timer;
 }
 
 /** Relay over a real socket: reconnects with backoff+jitter, resumes via cursors. */
