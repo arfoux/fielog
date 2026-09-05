@@ -7,7 +7,10 @@
   "scripts": {
     "test": "bun test",
     "build": "tsc -p tsconfig.json",
-    "demo": "bun demo/kasir-2hp.ts"
+    "demo": "bun demo/kasir-2hp.ts",
+    "bench:append": "bun bench/bench-append.ts",
+    "bench:query": "bun bench/bench-query.ts",
+    "bench:sync": "bun bench/bench-sync.ts"
   },
   "license": "MIT",
   "devDependencies": {
