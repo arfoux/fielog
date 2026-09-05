@@ -1,0 +1,12 @@
+{
+  "name": "fielog",
+  "version": "0.1.0",
+  "description": "Fieldlog — write anywhere, settle later. Offline-first append-log + SQLite read-model + sync.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "node --test test/",
+    "build": "tsc -p tsconfig.json"
+  },
+  "license": "MIT"
+}
