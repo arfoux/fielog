@@ -6,7 +6,8 @@
   "main": "src/index.ts",
   "scripts": {
     "test": "bun test",
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json",
+    "demo": "bun demo/kasir-2hp.ts"
   },
   "license": "MIT",
   "devDependencies": {

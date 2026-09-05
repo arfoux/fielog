@@ -129,6 +129,7 @@ export async function pullRemote(
       actor: remote.actor,
       device_id: deviceId,
       id: remote.id,
+      ts_device: remote.ts_device, // origin stamp kept as display metadata; order stays local
       origin_seq: remote.seq,
       origin_device: remote.device_id,
     });

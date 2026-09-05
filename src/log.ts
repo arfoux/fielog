@@ -2,9 +2,11 @@
 // Boring file: `tail -f kasir.log` friendly. One JSON object per line.
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  appendFileSync,
   closeSync,
   existsSync,
   fsyncSync,
+  ftruncateSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -61,6 +63,13 @@ export function hashFor(e: Omit<LogEvent, 'hash'>): string {
   return createHash('sha256').update(canonicalOf(e), 'utf8').digest('hex');
 }
 
+export interface VerifyResult {
+  ok: boolean;
+  at?: number;
+  reason?: string;
+  gaps?: number[]; // seqs re-anchored after a quarantined line (known gap, not tamper)
+}
+
 export interface AppendLog {
   path: string;
   append(input: AppendInput): LogEvent;
@@ -68,19 +77,81 @@ export interface AppendLog {
   readAfter(seq: number): LogEvent[];
   maxSeq(): number;
   lastHash(): string;
-  verify(): { ok: boolean; at?: number; reason?: string };
+  verify(): VerifyResult;
+  /** true when open truncated a torn tail write (kill mid-append). */
+  repairedTail: boolean;
+  /** mid-file lines skipped into <path>.quarantine. */
+  quarantined: number;
   close(): void;
 }
 
 export function openLog(path: string, defaultDeviceId: string): AppendLog {
   const dir = dirname(path);
   if (dir !== '' && dir !== '.') mkdirSync(dir, { recursive: true });
+  const quarantinePath = path + '.quarantine';
+  const seenQ = new Set<string>();
+  if (existsSync(quarantinePath)) {
+    for (const line of readFileSync(quarantinePath, 'utf8').split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        const parsed: unknown = JSON.parse(t);
+        if (parsed && typeof parsed === 'object' && 'sha' in parsed && typeof parsed.sha === 'string') {
+          seenQ.add(parsed.sha);
+        }
+      } catch {
+        seenQ.add(createHash('sha256').update(t, 'utf8').digest('hex'));
+      }
+    }
+  }
+  const noteQuarantine = (lineNo: number, raw: string): void => {
+    const sha = createHash('sha256').update(raw, 'utf8').digest('hex');
+    if (seenQ.has(sha)) return; // reopening must not duplicate forensics
+    seenQ.add(sha);
+    appendFileSync(quarantinePath, JSON.stringify({ line: lineNo, sha, raw }) + '\n');
+  };
   let events: LogEvent[] = [];
+  const gapBefore = new Set<number>(); // kept seqs following a skipped line
+  let skipPending = false;
+  let quarantined = 0;
+  let repairedTail = false;
   if (existsSync(path)) {
     const raw = readFileSync(path, 'utf8');
-    for (const line of raw.split('\n')) {
-      const t = line.trim();
-      if (t) events.push(JSON.parse(t) as LogEvent);
+    const parts = raw.split('\n');
+    // Offsets locate a torn tail for truncation; file ends with '\n' so the
+    // last part is always ''.
+    let off = 0;
+    const starts: number[] = parts.map((p) => {
+      const s = off;
+      off += Buffer.byteLength(p, 'utf8') + 1;
+      return s;
+    });
+    const lastIdx = parts.length - 2; // last non-empty line index
+    for (let i = 0; i <= lastIdx; i++) {
+      const t = parts[i].trim();
+      if (!t) continue;
+      try {
+        const ev = JSON.parse(t) as LogEvent;
+        if (skipPending) {
+          gapBefore.add(ev.seq);
+          skipPending = false;
+        }
+        events.push(ev);
+      } catch {
+        if (i === lastIdx) {
+          // Torn tail: the write never completed, so no event was ever
+          // durable — truncate it, keep a forensic copy, carry on.
+          const f = openSync(path, 'r+');
+          ftruncateSync(f, starts[i]);
+          closeSync(f);
+          noteQuarantine(i + 1, t + ' /* torn tail, truncated on open */');
+          repairedTail = true;
+        } else {
+          noteQuarantine(i + 1, t);
+          quarantined += 1;
+          skipPending = true;
+        }
+      }
     }
   }
   let nextSeq = events.length === 0 ? 1 : Math.max(...events.map((e) => e.seq)) + 1;
@@ -128,21 +199,26 @@ export function openLog(path: string, defaultDeviceId: string): AppendLog {
     lastHash(): string {
       return tip;
     },
-    verify(): { ok: boolean; at?: number; reason?: string } {
+    verify(): VerifyResult {
       let prev = GENESIS_HASH;
-      for (let i = 0; i < events.length; i++) {
-        const e = events[i];
-        if (e.prev_hash !== prev) {
-          return { ok: false, at: e.seq, reason: 'prev_hash mismatch (truncated/edited log?)' };
-        }
+      const gaps: number[] = [];
+      for (const e of events) {
         const { hash, ...core } = e;
         if (hashFor(core) !== hash) {
           return { ok: false, at: e.seq, reason: 'hash mismatch (tampered payload?)' };
         }
+        if (e.prev_hash !== prev) {
+          if (!gapBefore.has(e.seq)) {
+            return { ok: false, at: e.seq, reason: 'prev_hash mismatch (truncated/edited log?)' };
+          }
+          gaps.push(e.seq); // known gap: predecessor was quarantined, re-anchor
+        }
         prev = hash;
       }
-      return { ok: true };
+      return gaps.length > 0 ? { ok: true, gaps } : { ok: true };
     },
+    repairedTail,
+    quarantined,
     close(): void {
       try {
         closeSync(fd);
