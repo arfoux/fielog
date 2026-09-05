@@ -51,6 +51,11 @@ export interface LogEvent {
   origin_seq?: number;
   origin_device?: string;
   server_time?: number;
+  // Auth envelope: device signature over the hash-chain hash. Never hashed
+  // (signature covers the hash, not vice versa). Unsigned locals stay valid;
+  // pull verification only enforces this when a trusted registry is given.
+  signature?: string;
+  countersignatures?: Array<{ deviceId: string; signatureHex: string }>;
 }
 
 export interface AppendInput {
@@ -64,6 +69,8 @@ export interface AppendInput {
   origin_seq?: number;
   origin_device?: string;
   server_time?: number;
+  signature?: string;
+  countersignatures?: Array<{ deviceId: string; signatureHex: string }>;
 }
 
 /** Canonical bytes covered by the hash chain (server_time excluded on purpose). */
@@ -237,7 +244,9 @@ export function openLog(path: string, defaultDeviceId: string): AppendLog {
       let prev = marker?.tip ?? GENESIS_HASH; // swept prefix re-anchors here
       const gaps: number[] = [];
       for (const e of events) {
-        const { hash, ...core } = e;
+        const { hash, signature: _s, countersignatures: _c, ...core } = e;
+        void _s;
+        void _c;
         if (hashFor(core) !== hash) {
           return { ok: false, at: e.seq, reason: 'hash mismatch (tampered payload?)' };
         }

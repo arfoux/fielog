@@ -42,8 +42,11 @@ export function signEvent(privateKeyPem: string, ev: LogEvent): string {
 export function verifyEvent(publicKeyPem: string, ev: LogEvent, signatureHex: string): boolean {
   const { hash } = ev;
   // Recompute the chain hash so a signature can't be transplanted onto edited bytes.
-  const { hash: _drop, ...core } = ev;
+  // The auth envelope itself is never hashed (signature covers the hash).
+  const { hash: _drop, signature: _s, countersignatures: _c, ...core } = ev;
   void _drop;
+  void _s;
+  void _c;
   if (hashFor(core) !== hash) return false;
   return verifyBytes(publicKeyPem, hash, signatureHex);
 }

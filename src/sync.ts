@@ -3,6 +3,7 @@
 // The relay is dumb: accept raw log, broadcast, store. No business logic.
 import type { AppendLog, LogEvent } from './log.js';
 import { checkAppend, type EventStore } from './store.js';
+import { checkThreshold, verifyEvent, type Countersignature } from './auth.js';
 
 export interface PushAck {
   acked: string[]; // event UUIDs accepted
@@ -19,6 +20,11 @@ export interface SyncOpts {
   maxRetries?: number;
   baseMs?: number;
   maxMs?: number; // backoff cap; chaos tests pin this low
+  /** deviceId -> ed25519 publicKeyPem. When non-empty, pull verifies every
+   * remote event signature and dead-letters forgeries (cursor still advances). */
+  trustedDevices?: Map<string, string> | Record<string, string>;
+  /** High-value bayar gate: nominal >= limit needs threshold countersignatures. */
+  highValue?: { limit: number; threshold: number };
 }
 
 const ACK_SEQ_KEY = 'sync.ack_seq'; // local seq fully acked by the relay
@@ -86,13 +92,40 @@ function applyPushAck(
 }
 
 /** Per-chunk pull handling shared by pullRemote and failover pull. */
+function registryOf(opt: SyncOpts['trustedDevices']): Map<string, string> | null {
+  if (!opt) return null;
+  const m = opt instanceof Map ? opt : new Map(Object.entries(opt));
+  return m.size > 0 ? m : null;
+}
+
+/** Forgery gate: verify the origin device signature (+ countersign threshold
+ * for high-value bayar). False = dead-letter, never re-hashed clean. */
+function verifyPullAuth(remote: LogEvent, registry: Map<string, string> | null, highValue?: { limit: number; threshold: number }): boolean {
+  if (!registry) return true; // no registry: unsigned legacy path stays valid
+  const origin = remote.device_id;
+  const pub = typeof origin === 'string' ? registry.get(origin) : undefined;
+  if (!pub) return false; // unknown origin device: cannot authenticate
+  if (typeof remote.signature !== 'string' || remote.signature === '') return false;
+  if (!verifyEvent(pub, remote, remote.signature)) return false;
+  if (highValue && remote.type === 'bayar') {
+    const nominal = Number((remote.payload as Record<string, unknown>)?.['nominal']);
+    if (Number.isFinite(nominal) && nominal >= highValue.limit) {
+      const sigs = (remote.countersignatures ?? []) as Countersignature[];
+      if (!checkThreshold(registry, remote, sigs, highValue.threshold).thresholdMet) return false;
+    }
+  }
+  return true;
+}
+
 function applyPullEvents(
   log: AppendLog,
   store: EventStore,
   deviceId: string,
   events: LogEvent[],
   cursor: number,
+  opts: SyncOpts = {},
 ): number {
+  const registry = registryOf(opts.trustedDevices);
   let applied = 0;
   for (const remote of events) {
     // Fail-fast gate (mirrors kernel append): a poison event must never
@@ -108,6 +141,11 @@ function applyPullEvents(
     } catch {
       continue;
     }
+    // Forgery laundering gate: the relay stores verbatim (dumb by design),
+    // so anyone can stash a "bayar 1000000 as budi". Verify the ORIGIN hash
+    // before the local re-hash below mints a clean copy. Forged events are
+    // dead-lettered (skipped, cursor still advances past them).
+    if (!verifyPullAuth(remote, registry, opts.highValue)) continue;
     const ev = log.append({
       type: remote.type,
       payload: (remote.payload ?? {}) as Record<string, unknown>,
@@ -145,7 +183,6 @@ export async function pushPending(
   let pushed = 0;
   let acked = 0;
   let serverTime: number | null = getServerTime(store);
-
   for (;;) {
     const batch = log.readAfter(cursor).slice(0, chunkSize);
     if (batch.length === 0) break;
@@ -175,7 +212,7 @@ export async function pullRemote(
 ): Promise<PullResult> {
   const since = Number(store.getMeta(PULL_CURSOR_KEY) ?? 0);
   const { events, cursor } = await withBackoff(() => relay.pull(since), opts);
-  const applied = applyPullEvents(log, store, deviceId, events, cursor);
+  const applied = applyPullEvents(log, store, deviceId, events, cursor, opts);
   return { pulled: events.length, applied };
 }
 
@@ -317,7 +354,7 @@ export async function syncWithFailover(
       }
       try {
         const res = await relays[i].pull(since);
-        applied = applyPullEvents(log, store, deviceId, res.events, res.cursor);
+        applied = applyPullEvents(log, store, deviceId, res.events, res.cursor, opts);
         pulled = res.events.length;
         pullRelay = i;
         st.fails[i] = 0;
