@@ -5,6 +5,32 @@ Write anywhere, settle later.
 Offline-first primitives for apps that must survive bank-down, blank-spot,
 blackout: append-only log (source of truth) + SQLite read-model + sync-later.
 
+## install
+
+```sh
+bun add fielog
+```
+
+## quickstart
+
+```ts
+import { createKernel } from 'fielog';
+
+const kernel = await createKernel({ file: 'kasir.db' });
+await kernel.append({ type: 'bayar', nominal: 5000, oleh: 'kasir-1' });
+const rows = await kernel.query('SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0');
+console.log(rows[0]);
+kernel.close();
+```
+
+cli: `bunx fielog demo` runs the two-device kasir roundtrip and proves equal totals.
+
+## docs
+
+- benchmarks with measured numbers: [docs/bench.md](docs/bench.md), re-run via `bun run bench:append | bench:query | bench:sync` (scripts in [bench/](bench/))
+- log compat guarantee: [docs/compat.md](docs/compat.md)
+- changelog: [CHANGELOG.md](CHANGELOG.md)
+
 ## Core API (v0.4)
 
 | fungsi | bentuk | janji |
