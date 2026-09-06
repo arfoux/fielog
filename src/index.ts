@@ -7,6 +7,8 @@ export { openStore, MoneyState, checkAppend } from './store.js';
 export type { EventStore, MoneyState as MoneyStateType, SqlParams } from './store.js';
 export { MemoryRelay, pushPending, pullRemote, syncKernel, syncWithFailover, createFailoverState, withBackoff, backoffMs, getAckSeq, getServerTime } from './sync.js';
 export type { Relay, PushAck, PushResult, PullResult, SyncOpts, FailoverState, FailoverResult } from './sync.js';
+export { buildManifest, computeWant, createMemoryPeer, syncDelta } from './deltasync.js';
+export type { DeltaManifest, DeltaPeer, DeltaOpts, DeltaResult } from './deltasync.js';
 export {
   generateDeviceKey,
   signBytes,
