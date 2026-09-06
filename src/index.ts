@@ -1,6 +1,8 @@
 // fielog v0.1 — offline-first kernel: append-only log + SQLite read-model + sync.
 export { openLog, hashFor, canonicalOf, GENESIS_HASH } from './log.js';
 export type { LogEvent, AppendInput, AppendLog, VerifyResult } from './log.js';
+export { openHashChain, verifyChain, quarantinePathFor } from './hashchain.js';
+export type { HashChain } from './hashchain.js';
 export { openStore, MoneyState, checkAppend } from './store.js';
 export type { EventStore, MoneyState as MoneyStateType, SqlParams } from './store.js';
 export { MemoryRelay, pushPending, pullRemote, syncKernel, syncWithFailover, createFailoverState, withBackoff, backoffMs, getAckSeq, getServerTime } from './sync.js';
