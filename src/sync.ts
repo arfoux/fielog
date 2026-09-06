@@ -25,6 +25,15 @@ export interface SyncOpts {
   trustedDevices?: Map<string, string> | Record<string, string>;
   /** High-value bayar gate: nominal >= limit needs threshold countersignatures. */
   highValue?: { limit: number; threshold: number };
+  /** Device-level revoke set (origin device ids). Mirrors the relay tombstone
+   * list or RevokeLog '*' rows via isDeviceRevoked below. Matching pull
+   * events quarantine instead of converging; already-stored matches purge
+   * from the read views on retroactive sweep. Cursor still advances. */
+  revokedDevices?: Set<string> | string[];
+  /** Per-event revoke predicate (tokenId/epoch mapping over RevokeLog lives
+   * in the caller's closure). Checked after revokedDevices; either match
+   * quarantines. Receives the remote event on pull, the local event on sweep. */
+  isRevoked?: (ev: LogEvent) => boolean;
 }
 
 const ACK_SEQ_KEY = 'sync.ack_seq'; // local seq fully acked by the relay
@@ -128,6 +137,123 @@ function verifyPullAuth(remote: LogEvent, registry: Map<string, string> | null, 
   }
   return true;
 }
+// Revoke quarantine + retroactive purge (tutup bocor 3).
+//
+// Philosophy: quarantine closes ACCESS and keeps EVIDENCE — it never rewrites
+// or deletes the append-only log. A revoked pull event is recorded verbatim in
+// the `_quarantine` table (sqlite, alongside the read-model) and skipped past
+// the pull cursor like a dead-letter, so sync never converges blindly on
+// tainted data. Data that converged BEFORE the revoke arrived is purged from
+// the domain read views (bayar/stock_moves/records) by purgeRevoked; the log
+// line and the `_events` row stay so reopen replay (idempotent by UUID) cannot
+// resurrect the rows and forensics keeps the bytes.
+export interface QuarantineRow {
+  event_id: string;
+  reason: string;
+  ts: number;
+  event: string; // verbatim event JSON (evidence)
+}
+
+export interface PurgeResult {
+  scanned: number;
+  quarantined: number;
+}
+
+/** True when a RevokeLog-style view carries a whole-device ('*') row for deviceId. */
+export function isDeviceRevoked(
+  revokeLog: { revokedTokens(): Array<{ tokenId: string; deviceId: string }> },
+  deviceId: string,
+): boolean {
+  try {
+    return revokeLog.revokedTokens().some((r) => r.tokenId === '*' && r.deviceId === deviceId);
+  } catch {
+    return false;
+  }
+}
+
+/** Non-null when the event is revoked: device-set hit or predicate hit. */
+function revokeReason(ev: LogEvent, opts: SyncOpts): string | null {
+  // Origin device: relay events carry it in device_id; local copies keep it in origin_device.
+  const origin = typeof ev.origin_device === 'string' && ev.origin_device !== '' ? ev.origin_device : ev.device_id;
+  const rd = opts.revokedDevices;
+  if (rd) {
+    const set = rd instanceof Set ? rd : new Set(rd);
+    if (set.size > 0 && typeof origin === 'string' && set.has(origin)) return `device revoked: ${origin}`;
+  }
+  if (opts.isRevoked) {
+    let hit = false;
+    try {
+      hit = opts.isRevoked(ev) === true;
+    } catch {
+      hit = false;
+    }
+    if (hit) return `revoke predicate matched: ${ev.id}`;
+  }
+  return null;
+}
+
+export function ensureQuarantine(store: EventStore): void {
+  store.exec(
+    `CREATE TABLE IF NOT EXISTS _quarantine(event_id TEXT PRIMARY KEY, reason TEXT NOT NULL, ts INTEGER NOT NULL, event TEXT NOT NULL)`,
+  );
+}
+
+export function isQuarantined(store: EventStore, id: string): boolean {
+  ensureQuarantine(store);
+  return store.query(`SELECT 1 AS n FROM _quarantine WHERE event_id = ? LIMIT 1`, [id]).length > 0;
+}
+
+export function listQuarantine(store: EventStore): QuarantineRow[] {
+  ensureQuarantine(store);
+  return store.query<QuarantineRow>(`SELECT event_id, reason, ts, event FROM _quarantine ORDER BY ts, event_id`);
+}
+
+/** Record evidence + purge domain read views. Keeps the log line and the
+ * `_events` row (reopen replay stays a no-op by UUID). Returns true when newly quarantined. */
+function quarantineOne(store: EventStore, ev: LogEvent, reason: string): boolean {
+  ensureQuarantine(store);
+  const known = store.query(`SELECT 1 AS n FROM _quarantine WHERE event_id = ? LIMIT 1`, [ev.id]).length > 0;
+  const moves = store.query<{ n: number }>(`SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = ?`, [ev.id]);
+  store.query(`INSERT OR IGNORE INTO _quarantine(event_id, reason, ts, event) VALUES(?,?,?,?)`, [
+    ev.id,
+    reason,
+    Date.now(),
+    JSON.stringify(ev),
+  ]);
+  store.query(`DELETE FROM bayar WHERE event_id = ?`, [ev.id]);
+  store.query(`DELETE FROM stock_moves WHERE event_id = ?`, [ev.id]);
+  store.query(`DELETE FROM records WHERE event_id = ?`, [ev.id]);
+  if ((moves[0]?.n ?? 0) > 0) {
+    // Balances derive from moves: rebuild so quarantined stock stops counting.
+    store.exec(`DELETE FROM stock`);
+    store.exec(`INSERT INTO stock(item, qty) SELECT item, SUM(qty) FROM stock_moves WHERE voided = 0 GROUP BY item`);
+  }
+  return !known;
+}
+
+/** Retroactive sweep: quarantine every logged event the revoke set/predicate
+ * matches and purge it from the domain read views. The log file is untouched.
+ * Run after merging a RevokeLog (or receiving a relay tombstone) so pre-revoke
+ * data stops serving. Idempotent: re-sweeps quarantine nothing new. */
+export function purgeRevoked(log: AppendLog, store: EventStore, opts: SyncOpts = {}): PurgeResult {
+  ensureQuarantine(store);
+  let scanned = 0;
+  let quarantined = 0;
+  for (const ev of log.readAll()) {
+    scanned += 1;
+    const reason = revokeReason(ev, opts);
+    if (!reason) continue;
+    if (quarantineOne(store, ev, reason)) quarantined += 1;
+  }
+  return { scanned, quarantined };
+}
+
+/** True when the caller carries revoke state worth a retroactive sweep. */
+function hasRevokeSignal(opts: SyncOpts): boolean {
+  const rd = opts.revokedDevices;
+  if (rd && (rd instanceof Set ? rd.size : rd.length) > 0) return true;
+  return typeof opts.isRevoked === 'function';
+}
 
 function applyPullEvents(
   log: AppendLog,
@@ -137,9 +263,10 @@ function applyPullEvents(
   cursor: number,
   opts: SyncOpts = {},
   cursorKey = PULL_CURSOR_KEY,
-): number {
+): { applied: number; quarantined: number } {
   const registry = registryOf(opts.trustedDevices);
   let applied = 0;
+  let quarantined = 0;
   let storedAll = true;
   for (const remote of events) {
     // Fail-fast gate (mirrors kernel append): a poison event must never
@@ -147,7 +274,16 @@ function applyPullEvents(
     // BEFORE log.append; dead-letters are skipped while the cursor below
     // still advances past them, so one bad write can never brick sync.
     if (!remote || typeof remote.id !== 'string' || remote.id === '') continue;
-    if (store.hasId(remote.id)) continue;
+    if (store.hasId(remote.id)) {
+      // Retroactive catch: the revoke landed after this event converged.
+      // Purge it from the read views now (evidence stays in _quarantine).
+      const reason = revokeReason(remote, opts);
+      if (reason) {
+        const stored = store.getEventById(remote.id);
+        if (quarantineOne(store, stored ?? remote, reason)) quarantined += 1;
+      }
+      continue;
+    }
     if (log.hasId(remote.id)) {
       // Logged on an earlier run but never durably stored (kill between
       // log.append and store.apply, or a held cursor below). Re-drive the
@@ -156,6 +292,12 @@ function applyPullEvents(
       const pending = log.getById(remote.id);
       if (pending === null) {
         storedAll = false;
+        continue;
+      }
+      // Revoked while parked: quarantine instead of re-driving into the views.
+      const parkedReason = revokeReason(pending, opts);
+      if (parkedReason) {
+        if (quarantineOne(store, pending, parkedReason)) quarantined += 1;
         continue;
       }
       try {
@@ -180,6 +322,13 @@ function applyPullEvents(
     // before the local re-hash below mints a clean copy. Forged events are
     // dead-lettered (skipped, cursor still advances past them).
     if (!verifyPullAuth(remote, registry, opts.highValue)) continue;
+    // Revoke gate: a tainted pull quarantines (evidence recorded, cursor
+    // advances) instead of converging blindly into the read views.
+    const reason = revokeReason(remote, opts);
+    if (reason) {
+      if (quarantineOne(store, remote, reason)) quarantined += 1;
+      continue;
+    }
     const ev = log.append({
       type: remote.type,
       payload: (remote.payload ?? {}) as Record<string, unknown>,
@@ -202,7 +351,7 @@ function applyPullEvents(
     applied += 1;
   }
   if (events.length && storedAll) store.setMeta(cursorKey, String(cursor));
-  return applied;
+  return { applied, quarantined };
 }
 
 
@@ -235,6 +384,8 @@ export async function pushPending(
 export interface PullResult {
   pulled: number;
   applied: number;
+  /** Tainted pull events quarantined instead of applied (evidence in _quarantine). */
+  quarantined: number;
 }
 
 /** Pull remote events; apply idempotently by UUID under fresh local seq. */
@@ -247,8 +398,11 @@ export async function pullRemote(
 ): Promise<PullResult> {
   const since = Number(store.getMeta(PULL_CURSOR_KEY) ?? 0);
   const { events, cursor } = await withBackoff(() => relay.pull(since), opts);
-  const applied = applyPullEvents(log, store, deviceId, events, cursor, opts);
-  return { pulled: events.length, applied };
+  const { applied, quarantined } = applyPullEvents(log, store, deviceId, events, cursor, opts);
+  // Retroactive leg: revokes that landed after convergence purge here, so the
+  // kernel surface needs no extra call. Runs only when revoke state is present.
+  const swept = hasRevokeSignal(opts) ? purgeRevoked(log, store, opts).quarantined : 0;
+  return { pulled: events.length, applied, quarantined: quarantined + swept };
 }
 
 export async function syncKernel(
@@ -396,6 +550,7 @@ export async function syncWithFailover(
   let pullRelay = -1;
   let pulled = 0;
   let applied = 0;
+  let quarantined = 0;
   const maxPasses = (opts.maxRetries ?? 5) + 1;
   let lastErr: unknown = null;
   for (let pass = 0; pass < maxPasses; pass++) {
@@ -410,7 +565,9 @@ export async function syncWithFailover(
         const key = `${PULL_CURSOR_KEY}.r${i}`;
         const since = Number(store.getMeta(key) ?? store.getMeta(PULL_CURSOR_KEY) ?? 0);
         const res = await relays[i].pull(since);
-        applied += applyPullEvents(log, store, deviceId, res.events, res.cursor, opts, key);
+        const out = applyPullEvents(log, store, deviceId, res.events, res.cursor, opts, key);
+        applied += out.applied;
+        quarantined += out.quarantined;
         pulled += res.events.length;
         if (pullRelay < 0) pullRelay = i;
         st.fails[i] = 0;
@@ -433,7 +590,8 @@ export async function syncWithFailover(
     }
   }
   if (pullRelay < 0) throw lastErr instanceof Error ? lastErr : new Error(`all ${relays.length} relays failed`);
-  return { pushed, acked, serverTime, pulled, applied, pushRelay, pullRelay };
+  if (hasRevokeSignal(opts)) quarantined += purgeRevoked(log, store, opts).quarantined;
+  return { pushed, acked, serverTime, pulled, applied, quarantined, pushRelay, pullRelay };
 }
 
 // In-memory relay for tests and local dev. Replaceable in ~50 lines.
