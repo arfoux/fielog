@@ -9,6 +9,7 @@ import type { Server, ServerWebSocket } from 'bun';
 import type { LogEvent } from './log.js';
 import { backoffMs, type PushAck, type Relay } from './sync.js';
 import { verifyCapToken, type CapToken } from './auth.js';
+import { RevokeLog, type RevokeEvent, type RevokeInput } from './revokelog.js';
 
 export interface WsRelayServerOpts {
   port?: number; // 0 = ephemeral (read back via .port)
@@ -18,6 +19,8 @@ export interface WsRelayServerOpts {
   seed?: number; // chaos rng seed
   /** Pre-trusted devices: deviceId -> ed25519 publicKeyPem. Enforcement is on when non-empty. */
   trustedDevices?: Record<string, string>;
+  /** Admin registry for the convergent revoke log (deviceId -> ed25519 publicKeyPem). */
+  revokeAdmins?: Record<string, string>;
   /** Refuse to serve without a device registry (default true = legacy open
    * relay for library/dev use). The CLI passes false unless --unsigned. */
   allowUnsigned?: boolean;
@@ -26,11 +29,15 @@ export interface WsRelayServerOpts {
 type ToServer =
   | { op: 'push'; req: number; events: LogEvent[]; token?: CapToken }
   | { op: 'pull'; req: number; since: number; token?: CapToken }
+  | { op: 'revoke_pull'; req: number; cursor: number }
+  | { op: 'revoke_push'; req: number; events: RevokeEvent[] }
   | { op: 'pong' };
 
 type ToClient =
   | { op: 'push_ack'; req: number; acked: string[]; server_time: number }
   | { op: 'pull_res'; req: number; events: LogEvent[]; cursor: number }
+  | { op: 'revoke_res'; req: number; events: RevokeEvent[]; cursor: number }
+  | { op: 'revoke_ack'; req: number; added: number; skipped: number; rejected: number; cursor: number }
   | { op: 'live'; events: LogEvent[] }
   | { op: 'revoked'; deviceId: string }
   | { op: 'error'; req: number; code: string; message: string }
@@ -59,21 +66,27 @@ export class WsRelayServer {
   private sockets = new Set<ServerWebSocket<SockState>>();
   private hbTimer: Timer | undefined = undefined;
   private logFd: number | null = null;
-  private rng: () => number;
   private devices = new Map<string, string>(); // deviceId -> publicKeyPem
   private revoked = new Set<string>(); // deviceIds; tombstones broadcast + persisted
+  /** Convergent authenticated revoke log (revokelog.ts); empty when no admin configured. */
+  readonly revokes = new RevokeLog();
   serverTime = 1_700_000_000_000;
   pushesReceived = 0;
   pullsReceived = 0;
   pongsReceived = 0;
   rejectsReceived = 0;
-  /** Test hook: kill the server after this many push messages (crash, no ack). */
+  revokePullsReceived = 0;
+  revokePushesReceived = 0;
+  revokeRejected = 0; // forged/dangling revoke events refused over the wire, never stored
   crashAfter: number | null = null;
 
   constructor(private opts: WsRelayServerOpts = {}) {
     this.rng = mulberry32(opts.seed ?? 1);
     if (opts.trustedDevices) {
       for (const [id, pem] of Object.entries(opts.trustedDevices)) this.devices.set(id, pem);
+    }
+    if (opts.revokeAdmins) {
+      for (const [id, pem] of Object.entries(opts.revokeAdmins)) this.revokes.addAdmin(id, pem);
     }
     if (opts.file && existsSync(opts.file)) {
       for (const line of readFileSync(opts.file, 'utf8').split('\n')) {
@@ -91,6 +104,7 @@ export class WsRelayServer {
       }
     }
     this.loadRevocations();
+    this.loadRevokeLog();
   }
 
   /** Sidecar next to the event log; same file key, never mixed into event lines. */
@@ -122,6 +136,77 @@ export class WsRelayServer {
     this.devices.set(deviceId, publicKeyPem);
   }
 
+  /** Trust a revoke admin (same registry the handshake peers share). */
+  addRevokeAdmin(deviceId: string, publicKeyPem: string): void {
+    this.revokes.addAdmin(deviceId, publicKeyPem);
+  }
+
+  /** JSONL next to the event log; one signed RevokeEvent per line, never mixed into event lines. */
+  private revokeLogFile(): string | null {
+    return this.opts.file ? this.opts.file + '.revoke-events' : null;
+  }
+
+  private loadRevokeLog(): void {
+    const f = this.revokeLogFile();
+    if (!f || !existsSync(f)) return;
+    const batch: RevokeEvent[] = [];
+    for (const line of readFileSync(f, 'utf8').split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        batch.push(JSON.parse(t) as RevokeEvent);
+      } catch {
+        /* corrupt revoke line: not an event, skip on reload */
+      }
+    }
+    // Idempotent set-union: forged or dangling lines are counted as rejected, never stored.
+    this.revokeRejected += this.revokes.merge(batch).rejected;
+  }
+
+  private persistRevokes(fresh: RevokeEvent[]): void {
+    const f = this.revokeLogFile();
+    if (!f || fresh.length === 0) return;
+    const dir = dirname(f);
+    if (dir !== '' && dir !== '.') mkdirSync(dir, { recursive: true });
+    const fd = openSync(f, 'a');
+    try {
+      writeSync(fd, fresh.map((e) => JSON.stringify(e)).join('\n') + '\n');
+      fsyncSync(fd); // durable before any ack: restart loses nothing
+    } finally {
+      closeSync(fd);
+    }
+  }
+
+  /** Admin-signed revoke into the convergent log (persists + converges via handshake). */
+  issueRevoke(adminPrivatePem: string, admin: string, input: RevokeInput, now: number = Date.now()): RevokeEvent {
+    const e = this.revokes.create(adminPrivatePem, admin, input, now);
+    this.persistRevokes([e]);
+    return e;
+  }
+
+  /** Canonical convergent view, byte-equal across replicas after full merge. */
+  revokeSnapshot(): RevokeEvent[] {
+    return this.revokes.snapshot();
+  }
+
+  /** Local revoke-log length; doubles as the next diffSince cursor. */
+  revokeCursor(): number {
+    return this.revokes.size;
+  }
+
+  /** Whole-device tombstone derived from the log: some '*' event names this device. */
+  isDeviceRevokedByLog(deviceId: string): boolean {
+    for (const e of this.revokes.snapshot()) {
+      if (e.tokenId === '*' && e.deviceId === deviceId) return true;
+    }
+    return false;
+  }
+
+  /** Per-token kill: some event for tokenId carries an equal-or-higher epoch. */
+  isTokenRevoked(tokenId: string, tokenEpoch = 0): boolean {
+    return this.revokes.isRevoked(tokenId, tokenEpoch);
+  }
+
   /** Revoke a device: future push/pull rejected, tombstone broadcast + persisted. */
   revokeDevice(deviceId: string): void {
     this.revoked.add(deviceId);
@@ -137,11 +222,15 @@ export class WsRelayServer {
   }
 
   isRevoked(deviceId: string): boolean {
-    return this.revoked.has(deviceId);
+    return this.revoked.has(deviceId) || this.isDeviceRevokedByLog(deviceId);
   }
 
   revokedIds(): string[] {
-    return [...this.revoked].sort();
+    const ids = new Set<string>(this.revoked);
+    for (const e of this.revokes.snapshot()) {
+      if (e.tokenId === '*') ids.add(e.deviceId);
+    }
+    return [...ids].sort();
   }
 
   get enforcing(): boolean {
@@ -261,6 +350,32 @@ export class WsRelayServer {
       ws.data.lastPong = Date.now();
       return;
     }
+    // Revoke handshake bypasses the capability gate and the chaos drop: the
+    // events are self-authenticating (admin ed25519 over the content hash),
+    // idempotent by hash, and a revoked device must still learn its own
+    // revocation on reconnect. Forgeries are counted as rejected, never stored.
+    if (msg.op === 'revoke_pull') {
+      this.revokePullsReceived += 1;
+      let out: { events: RevokeEvent[]; cursor: number };
+      try {
+        out = this.revokes.diffSince(msg.cursor);
+      } catch {
+        this.send(ws, { op: 'error', req: msg.req, code: 'bad_cursor', message: `revoke rejected: bad cursor ${msg.cursor}` });
+        return;
+      }
+      this.send(ws, { op: 'revoke_res', req: msg.req, events: out.events, cursor: out.cursor });
+      return;
+    }
+    if (msg.op === 'revoke_push') {
+      this.revokePushesReceived += 1;
+      const batch = Array.isArray(msg.events) ? msg.events : [];
+      const known = new Set(this.revokes.snapshot().map((e) => e.hash));
+      const res = this.revokes.merge(batch);
+      this.revokeRejected += res.rejected;
+      this.persistRevokes(this.revokes.snapshot().filter((e) => !known.has(e.hash)));
+      this.send(ws, { op: 'revoke_ack', req: msg.req, added: res.added, skipped: res.skipped, rejected: res.rejected, cursor: this.revokes.size });
+      return;
+    }
     // Capability gate runs before chaos: rejected payloads are never stored.
     if (msg.op === 'push') {
       if (!this.authorize(ws, msg.req, msg.token, 'relay:push')) return;
@@ -313,7 +428,10 @@ export class WsRelayServer {
       return false;
     };
     if (!token) return fail('missing capability token');
-    if (this.revoked.has(token.deviceId)) return fail(`device revoked: ${token.deviceId}`);
+    if (this.revoked.has(token.deviceId) || this.isDeviceRevokedByLog(token.deviceId)) {
+      return fail(`device revoked: ${token.deviceId}`);
+    }
+    if (token.id && this.revokes.isRevoked(token.id)) return fail(`token revoked: ${token.id}`);
     const pem = this.devices.get(token.deviceId);
     if (!pem) return fail(`unknown device: ${token.deviceId}`);
     if (!verifyCapToken(pem, token, scope)) return fail(`capability rejected for ${scope}`);
@@ -358,6 +476,8 @@ export interface WsRelayClientOpts {
   maxRetries?: number; // reconnect attempts per call
   reqTimeoutMs?: number;
   capToken?: CapToken; // capability token attached to every push/pull
+  /** Admin registry for the convergent revoke log (deviceId -> ed25519 publicKeyPem). */
+  revokeAdmins?: Record<string, string>;
 }
 
 interface Inflight {
@@ -379,12 +499,21 @@ export class WsRelayClient implements Relay {
   revokedNotices: string[] = [];
   pingsReceived = 0;
   reconnects = 0;
+  /** Convergent authenticated revoke log; syncs with the relay on every pull/push. */
+  readonly revokes = new RevokeLog();
+  private revokeServerCursor = 0; // relay log prefix already merged locally
+  private revokeUpTo = 0; // local log prefix already offered to the relay
+  revokeSyncs = 0;
+  revokeRejected = 0; // forged/dangling events refused by either side, never stored
 
   constructor(
     private url: string,
     private opts: WsRelayClientOpts = {},
   ) {
     this.capToken = opts.capToken;
+    if (opts.revokeAdmins) {
+      for (const [id, pem] of Object.entries(opts.revokeAdmins)) this.revokes.addAdmin(id, pem);
+    }
   }
 
   /** Swap the capability token (rotation / expiry refresh without redialling). */
@@ -480,7 +609,7 @@ export class WsRelayClient implements Relay {
     f.resolve(msg);
   }
 
-  private request(op: 'push' | 'pull', body: Record<string, unknown>): Promise<ToClient> {
+  private request(op: 'push' | 'pull' | 'revoke_pull' | 'revoke_push', body: Record<string, unknown>): Promise<ToClient> {
     const reqTimeoutMs = this.opts.reqTimeoutMs ?? 10_000;
     return (async () => {
       const ws = await this.ensureConn();
@@ -491,8 +620,12 @@ export class WsRelayClient implements Relay {
         reject(new Error(`relay req ${req} timed out`));
       }, reqTimeoutMs);
       this.inflight.set(req, { resolve, reject, timer });
+      // Revoke ops carry no capability token: the events authenticate
+      // themselves via the admin signature, and a revoked device must still
+      // complete the handshake to learn its own revocation.
+      const auth = op === 'push' || op === 'pull' ? { ...(this.capToken ? { token: this.capToken } : {}) } : {};
       try {
-        ws.send(JSON.stringify({ op, req, ...(this.capToken ? { token: this.capToken } : {}), ...body }));
+        ws.send(JSON.stringify({ op, req, ...auth, ...body }));
       } catch (e) {
         clearTimeout(timer);
         this.inflight.delete(req);
@@ -502,7 +635,92 @@ export class WsRelayClient implements Relay {
     })();
   }
 
+  /** Trust a revoke admin (same registry the relay and peers share). */
+  addRevokeAdmin(deviceId: string, publicKeyPem: string): void {
+    this.revokes.addAdmin(deviceId, publicKeyPem);
+  }
+
+  /** Canonical convergent view, byte-equal with the relay after a full handshake. */
+  revokeSnapshot(): RevokeEvent[] {
+    return this.revokes.snapshot();
+  }
+
+  isTokenRevoked(tokenId: string, tokenEpoch = 0): boolean {
+    return this.revokes.isRevoked(tokenId, tokenEpoch);
+  }
+
+  isDeviceRevoked(deviceId: string): boolean {
+    if (this.revokedNotices.includes(deviceId)) return true;
+    for (const e of this.revokes.snapshot()) {
+      if (e.tokenId === '*' && e.deviceId === deviceId) return true;
+    }
+    return false;
+  }
+
+  /** Raw tail fetch; throws on protocol error (bad cursor included). */
+  async pullRevokes(cursor: number): Promise<{ events: RevokeEvent[]; cursor: number }> {
+    const res = await this.request('revoke_pull', { cursor });
+    if (res.op === 'error') throw new Error(`relay rejected revoke_pull: ${res.message}`);
+    if (res.op !== 'revoke_res') throw new Error('relay protocol: expected revoke_res');
+    return { events: res.events, cursor: res.cursor };
+  }
+
+  /** Raw tail offer; forgeries count as rejected, never stored. */
+  async pushRevokes(events: RevokeEvent[]): Promise<{ added: number; skipped: number; rejected: number; cursor: number }> {
+    const res = await this.request('revoke_push', { events });
+    if (res.op === 'error') throw new Error(`relay rejected revoke_push: ${res.message}`);
+    if (res.op !== 'revoke_ack') throw new Error('relay protocol: expected revoke_ack');
+    return { added: res.added, skipped: res.skipped, rejected: res.rejected, cursor: res.cursor };
+  }
+
+  /**
+   * Bidirectional revoke handshake: pull the relay tail since the last known
+   * server cursor and merge idempotently, offer the unseen local tail, then
+   * pull once more so concurrent relay writes converge in a single call.
+   * A stale cursor (relay restarted from an older file) falls back to a full
+   * snapshot merge; set-union is idempotent so replay is always safe.
+   */
+  async syncRevokes(): Promise<{ added: number; skipped: number; rejected: number; serverCursor: number }> {
+    const total = { added: 0, skipped: 0, rejected: 0 };
+    const absorb = async (): Promise<void> => {
+      let res: { events: RevokeEvent[]; cursor: number };
+      try {
+        res = await this.pullRevokes(this.revokeServerCursor);
+      } catch (err) {
+        if (!(err instanceof Error) || !/bad cursor|bad_cursor/.test(err.message)) throw err;
+        this.revokeServerCursor = 0;
+        res = await this.pullRevokes(0);
+      }
+      const m = this.revokes.merge(res.events);
+      total.added += m.added;
+      total.skipped += m.skipped;
+      total.rejected += m.rejected;
+      this.revokeServerCursor = res.cursor;
+    };
+    await absorb();
+    const tail = this.revokes.diffSince(this.revokeUpTo).events;
+    const ack = await this.pushRevokes(tail);
+    total.added += ack.added;
+    total.skipped += ack.skipped;
+    total.rejected += ack.rejected;
+    this.revokeUpTo = this.revokes.size;
+    await absorb();
+    this.revokeSyncs += 1;
+    this.revokeRejected += total.rejected;
+    return { ...total, serverCursor: this.revokeServerCursor };
+  }
+
+  /** Best-effort handshake around data ops: revoke state is a hint, the data pull stays the source of truth. */
+  private async maybeSyncRevokes(): Promise<void> {
+    try {
+      await this.syncRevokes();
+    } catch {
+      /* next connect/pull retries idempotently */
+    }
+  }
+
   async push(batch: LogEvent[]): Promise<PushAck> {
+    await this.maybeSyncRevokes();
     const res = await this.request('push', { events: batch });
     if (res.op === 'error') throw new Error(`relay rejected push: ${res.message}`);
     if (res.op !== 'push_ack') throw new Error('relay protocol: expected push_ack');
@@ -510,8 +728,10 @@ export class WsRelayClient implements Relay {
   }
 
   async pull(since: number): Promise<{ events: LogEvent[]; cursor: number }> {
+    await this.maybeSyncRevokes();
     const res = await this.request('pull', { since });
     if (res.op === 'error') throw new Error(`relay rejected pull: ${res.message}`);
+    if (res.op !== 'pull_res') throw new Error('relay protocol: expected pull_res');
     // Merge live hints the server history doesn't cover yet; UUID dedupe
     // keeps it exact (kernel also skips known UUIDs on apply).
     const seen = new Set(res.events.map((e) => e.id));
