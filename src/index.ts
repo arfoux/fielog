@@ -31,3 +31,5 @@ export { WsRelayServer, WsRelayClient, mulberry32 } from './relay.js';
 export type { WsRelayServerOpts, WsRelayClientOpts } from './relay.js';
 export { takeSnapshot, sweepLogFile, snapshotPathFor } from './retain.js';
 export type { SnapshotResult, TruncateResult } from './retain.js';
+export { openCas, casKeyFor, casShardFor, casPathFor, casQuarantinePathFor } from './cas.js';
+export type { CasStore, CasStat } from './cas.js';
