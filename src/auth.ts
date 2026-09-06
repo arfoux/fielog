@@ -51,8 +51,13 @@ export function verifyEvent(publicKeyPem: string, ev: LogEvent, signatureHex: st
   return verifyBytes(publicKeyPem, hash, signatureHex);
 }
 
-// Scopes: revocable capability grants signed by an authority key.
+// Named TTLs: single source for grant/capability lifetimes. The relay path
+// uses the short capability default; callers needing longer sessions pass
+// an explicit ttlMs rather than forking a second magic number.
+export const GRANT_TTL_MS = 24 * 3600 * 1000;
+export const CAP_TOKEN_TTL_MS = 15 * 60 * 1000;
 
+ // Scopes: revocable capability grants signed by an authority key.
 export interface ScopeGrant {
   id: string;
   deviceId: string;
@@ -79,7 +84,7 @@ export function issueGrant(
   issuedBy: string,
   deviceId: string,
   scopes: string[],
-  ttlMs = 24 * 3600 * 1000,
+  ttlMs = GRANT_TTL_MS,
   now = Date.now(),
 ): ScopeGrant {
   const grant: Omit<ScopeGrant, 'signature'> = {
@@ -124,8 +129,11 @@ export function verifyGrant(
 // Capability tokens: the device key itself signs a scope+expiry token.
 // The relay holds a deviceId -> publicKey registry and verifies the
 // signature + scope + expiry on every push/pull. No authority key involved.
+// Self-signed limit: possession of a valid token equals the device key for
+// its scopes until expiry or revocation — see docs/capability-token.md.
 
 export interface CapToken {
+  id: string; // per-token id: revocation is granular, never whole-device only
   deviceId: string;
   scopes: string[]; // e.g. ['relay:push', 'relay:pull']
   issuedAt: number;
@@ -135,6 +143,7 @@ export interface CapToken {
 
 export function canonicalCapToken(t: Omit<CapToken, 'signature'>): string {
   return JSON.stringify({
+    id: t.id,
     deviceId: t.deviceId,
     scopes: [...t.scopes].sort(),
     issuedAt: t.issuedAt,
@@ -146,10 +155,11 @@ export function mintCapToken(
   privateKeyPem: string,
   deviceId: string,
   scopes: string[],
-  ttlMs = 3600 * 1000,
+  ttlMs = CAP_TOKEN_TTL_MS,
   now = Date.now(),
 ): CapToken {
   const core: Omit<CapToken, 'signature'> = {
+    id: randomUUID(),
     deviceId,
     scopes,
     issuedAt: now,
@@ -158,18 +168,82 @@ export function mintCapToken(
   return { ...core, signature: signBytes(privateKeyPem, canonicalCapToken(core)) };
 }
 
+/** Per-token-id revocation for capability tokens (granular: one token dies, siblings live). */
+export class CapRevocationList {
+  private revoked = new Set<string>(); // token ids; dynamic membership → Set
+  revoke(tokenId: string): void {
+    this.revoked.add(tokenId);
+  }
+  isRevoked(tokenId: string): boolean {
+    return this.revoked.has(tokenId);
+  }
+  get size(): number {
+    return this.revoked.size;
+  }
+}
+
 export function verifyCapToken(
   publicKeyPem: string,
   token: CapToken,
   scope: string,
+  revocations?: CapRevocationList,
   now = Date.now(),
 ): boolean {
   if (!token.signature) return false;
+  if (!token.id) return false; // id-less legacy token: fail closed, re-mint
   if (token.expiresAt <= token.issuedAt) return false;
   if (now > token.expiresAt) return false;
+  if (revocations?.isRevoked(token.id)) return false;
   const { signature, ...core } = token;
   if (!verifyBytes(publicKeyPem, canonicalCapToken(core), signature)) return false;
   return token.scopes.includes(scope);
+}
+
+export type AuthorizeVerdict = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Authorize a relay op against a capability token: device tombstone first,
+ * then per-token-id revocation, signature, expiry, and scope — in that order
+ * so revoked callers never reach crypto. This is the authorize path the relay
+ * mirrors (see WsRelayServer.authorize in src/relay.ts, read-only here).
+ */
+export function authorizeCapToken(opts: {
+  publicKeyPem: string | undefined;
+  token: CapToken | undefined;
+  scope: string;
+  revocations?: CapRevocationList;
+  revokedDevices?: Set<string> | string[];
+  now?: number;
+}): AuthorizeVerdict {
+  const now = opts.now ?? Date.now();
+  if (!opts.token) return { ok: false, reason: 'missing capability token' };
+  const revoked = opts.revokedDevices instanceof Set ? opts.revokedDevices : new Set(opts.revokedDevices ?? []);
+  if (revoked.has(opts.token.deviceId)) return { ok: false, reason: `device revoked: ${opts.token.deviceId}` };
+  if (!opts.publicKeyPem) return { ok: false, reason: `unknown device: ${opts.token.deviceId}` };
+  if (!verifyCapToken(opts.publicKeyPem, opts.token, opts.scope, opts.revocations, now)) {
+    return { ok: false, reason: `capability rejected for ${opts.scope}` };
+  }
+  return { ok: true };
+}
+
+/**
+ * Authorize a kasir-scoped op against an authority-signed grant. Wires the
+ * previously call-site-free verifyGrant into the authorize path so kasir
+ * scopes (kasir:append, kasir:settle) are gated per grant id, not assumed.
+ */
+export function authorizeGrant(opts: {
+  authorityPublicPem: string;
+  grant: ScopeGrant | undefined;
+  scope: string;
+  revocations?: RevocationList;
+  now?: number;
+}): AuthorizeVerdict {
+  const now = opts.now ?? Date.now();
+  if (!opts.grant) return { ok: false, reason: 'missing scope grant' };
+  if (!verifyGrant(opts.authorityPublicPem, opts.grant, opts.scope, opts.revocations, now)) {
+    return { ok: false, reason: `grant rejected for ${opts.scope}` };
+  }
+  return { ok: true };
 }
 
 // Countersign: high-value moves need ≥ threshold distinct authorized signatures.
