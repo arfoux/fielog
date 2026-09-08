@@ -5,101 +5,68 @@ Write anywhere, settle later.
 Offline-first primitives for apps that must survive bank-down, blank-spot,
 blackout: append-only log (source of truth) + SQLite read-model + sync-later.
 
-## Install
-
-```sh
-bun add fielog
-# or: npm i fielog
-```
-
-Requires `bun` (>= 1.0) at runtime — `kernel` and `WsRelayServer` use `bun:sqlite` and `Bun.serve`.
-CLI: `bunx fielog demo` or `bun bin/fielog.ts demo`.
-CLI serve/sync default mode tanda: serve butuh `--trust <id=pub.pem>`
-(ulang per device), sync butuh `--key <priv.pem> --as <device>`.
-`--unsigned` relay terbuka hanya untuk dev lokal, bukan produksi.
-
-## Quickstart
-
 ```js
 import { createKernel } from 'fielog';
 
 const k = await createKernel({ file: 'kasir.db' });
 await k.append({ type: 'bayar', nominal: 5000, oleh: 'kasir-1' });
 const rows = await k.query('SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0');
-console.log(rows[0].total); // 5000
+console.log(rows[0].total); // 5000 — IOU_RECORDED, bukan lunas
 k.close();
 ```
 
-Two devices, sync later via a relay (`demo/kasir-2hp.ts`, run with `bun run demo`):
+Uang offline selalu tercatat sebagai `IOU_RECORDED`; settlement butuh ack
+online. `append`/`query`/`undo` tidak pernah menyentuh jaringan — hanya
+`sync`.
 
-```js
-import { createKernel, WsRelayServer, WsRelayClient } from 'fielog';
+## Mulai
 
-const server = new WsRelayServer({ port: 8091, file: 'relay.log' });
-await server.start();
-const hp1 = await createKernel({ file: 'hp1.db' });
-const hp2 = await createKernel({ file: 'hp2.db' });
-await hp1.append({ type: 'bayar', nominal: 5000, oleh: 'kasir-1' });
-await hp1.sync(new WsRelayClient('ws://127.0.0.1:8091'));
-await hp2.sync(new WsRelayClient('ws://127.0.0.1:8091'));
-```
+- [install](docs/install.md) — syarat (`bun` >= 1.0), pasang, file yang lahir
+- [quickstart](docs/quickstart.md) — 1 HP offline, 2 HP sync (dev + mode tanda), runnable
+- [cli](docs/cli.md) — `serve` / `sync` / `demo`, tiap flag terverifikasi ke `bin/fielog.ts`
+- Contoh nyata: `demo/kasir-2hp.ts` (`bun run demo`), `example/kasir.mjs` (`bun example/kasir.mjs`)
 
-## Docs
+## Konsep & arsitektur
 
-- benchmarks with measured numbers: [docs/bench.md](docs/bench.md), re-run via `bun run bench:append | bench:query | bench:sync` (scripts in [bench/](bench/))
-- log compat guarantee: [docs/compat.md](docs/compat.md)
-- changelog: [CHANGELOG.md](CHANGELOG.md)
+- [architecture](docs/architecture.md) — peta modul log/store/kernel/sync/relay/cas/retain
+- [contracts](docs/contracts.md) — janji mengikat: dead-letter, kompensator buta,
+  seal<=ack, device.explicit, purge inkremental, jitter deterministik, superset v0.5
+- [kernel-api](docs/kernel-api.md) — `createKernel`, `Kernel`, `LogEvent`, `EventStore`
+- [sync-protocol](docs/sync-protocol.md) — push/pull, failover, backoff, deltasync
+- [relay](docs/relay.md) — `WsRelayServer` + `WsRelayClient`
+- [retention](docs/retention.md) — snapshot + truncate
+- [auth](docs/auth.md) — device key, grant, token kapabilitas, countersign, revoke
 
-## Core API (v0.13)
+## Subsistem (pendalaman)
 
-| fungsi | bentuk | janji |
-|---|---|---|
-| `append({type, ...isi} \| {type, payload})` | `Promise<LogEvent>` | tulis log + fsync, tanpa jaringan. `bayar` selalu `IOU_RECORDED`, `PAID_OFFLINE` ditolak |
-| `query(sql, params?)` | `Promise<rows[]>` | baca sqlite lokal, tanpa jaringan. `kasir.db` bisa dibuka di dbeaver |
-| `undo(id, actor?)` | `Promise<LogEvent>` | event kompensasi, riwayat tidak dihapus |
-| `settle(id, 'settled' \| 'failed' \| 'expired')` | `Promise<LogEvent>` | `DRAFT → IOU_RECORDED → SETTLED_ONLINE \| FAILED \| EXPIRED` |
-| `sync(relay, {chunkSize, maxRetries, baseMs, maxMs}?)` | `Promise<{pushed, acked, pulled, applied}>` | delta per `seq`, lanjut dari cursor ack, idempoten per UUID |
-| `conflicts()` | `Promise<rows[]>` | baris konflik terbuka untuk rekonsiliasi manusia |
-| `health()` | `{events, quarantined, repairedTail, gaps}` | kondisi log: baris korup, ekor robek, celah rantai |
+- token: [capability-token](docs/capability-token.md) · revoke:
+  [revoke-handshake](docs/revoke-handshake.md),
+  [revoke-event-log](docs/revoke-event-log.md) — regroup di [auth](docs/auth.md)
+- delta-sync: [delta-sync](docs/delta-sync.md) · hash chain:
+  [hash-chain-log](docs/hash-chain-log.md) · karantina: [quarantine](docs/quarantine.md)
+- lampiran: [cas-store](docs/cas-store.md) · soft-delete:
+  [tombstone-engine](docs/tombstone-engine.md) · kuota: [quota-guard](docs/quota-guard.md)
+- rig & harness: [multi-device-rig](docs/multi-device-rig.md),
+  [corpus-generator](docs/corpus-generator.md),
+  [corruption-generator](docs/corruption-generator.md),
+  [cold-drill](docs/cold-drill.md), [soak-runner](docs/soak-runner.md),
+  [chaos-kill](docs/chaos-kill.md), [flake-hunter](docs/flake-hunter.md),
+  [conformance-gate](docs/conformance-gate.md), [watchdog](docs/watchdog.md),
+  [mismatch-stop](docs/mismatch-stop.md), [completion-protocol](docs/completion-protocol.md),
+  [merge-runner](docs/merge-runner.md), [model-oracle](docs/model-oracle.md),
+  [compat-vectors](docs/compat-vectors.md), [decision-log](docs/decision-log.md)
 
-Relay: `MemoryRelay` (in-memory, buat test) atau `WsRelayServer` +
-`WsRelayClient` di `src/relay.ts` (bun serve, file-backed + fsync, reconnect
-backoff, heartbeat, broadcast). Contoh kasir 2 hp di bawah bisa dicopy jalan
-apa adanya — simpan sebagai `kasir-2hp.mjs` di root repo, lalu `bun kasir-2hp.mjs`:
+## Angka, batasan, kontribusi
 
-```js
-import { createKernel, WsRelayServer, WsRelayClient } from './src/index.ts';
+- Benchmark: [bench](docs/bench.md) (terukur 2026-09-05) —
+  smoke 2026-09-09: `bun bench/bench-append.ts 200` →
+  **306 append/detik, p50 3.07 ms, p99 7.63 ms**.
+  Ulang via `bun run bench:append | bench:query | bench:sync`.
+- Kompat log: [compat](docs/compat.md) · changelog: [CHANGELOG](CHANGELOG.md)
+- Batasan + troubleshooting: [limits-troubleshooting](docs/limits-troubleshooting.md)
+- Kontribusi: [CONTRIBUTING](CONTRIBUTING.md) · keamanan: [SECURITY](SECURITY.md) ·
+  perilaku: [CODE_OF_CONDUCT](CODE_OF_CONDUCT.md)
 
-const server = new WsRelayServer({ port: 8091, file: 'relay.log' });
-await server.start();
-
-const hp1 = await createKernel({ file: 'hp1.db' });
-const hp2 = await createKernel({ file: 'hp2.db' });
-
-// 20 transaksi offline di hp1: tanpa jaringan sama sekali.
-for (let i = 0; i < 20; i++) {
-  await hp1.append({ type: 'bayar', nominal: 5000 + i * 250, oleh: 'kasir-1' });
-}
-const show = async (k, nama) => {
-  const r = await k.query('SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0');
-  console.log(nama, '=', r[0].total ?? 0);
-};
-await show(hp1, 'offline hp1');
-await show(hp2, 'offline hp2');
-
-// Sync dua sisi lewat relay ws lokal.
-const c1 = new WsRelayClient('ws://127.0.0.1:8091');
-const c2 = new WsRelayClient('ws://127.0.0.1:8091');
-await hp1.sync(c1);
-await hp2.sync(c2);
-await show(hp1, 'sync    hp1');
-await show(hp2, 'sync    hp2');
-
-c1.close();
-c2.close();
-hp1.close();
-hp2.close();
-server.kill();
-```
-
-(Blok di atas juga ada sebagai `demo/kasir-2hp.ts`, jalan via `bun run demo`.)
+CLI serve/sync default mode tanda: serve butuh `--trust <id=pub.pem>`
+(ulang per device), sync butuh `--key <priv.pem> --as <device>`.
+`--unsigned` relay terbuka hanya untuk dev lokal, bukan produksi.

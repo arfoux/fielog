@@ -4,8 +4,14 @@ All entries describe user-visible changes shipped under each tag, in tag order.
 Untagged commits are folded into the next tag that shipped them.
 
 
-## Unreleased (v0.13.0) — audit + perf waves
+## Unreleased (v0.13.0) — audit + perf waves, docs topikal
 
+- Docs: README jadi pintu + indeks; isi per topik satu-concern (install,
+  quickstart, architecture, kernel-api, sync-protocol, relay, retention,
+  auth, contracts, cli, limits-troubleshooting), tabel API terverifikasi ke `src/`.
+- Baru: `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md` (solo/small-team).
+- Bench smoke 2026-09-09 `bun bench/bench-append.ts 200` = 306
+  append/detik, p50 3.07 ms, p99 7.63 ms; angka penuh di `docs/bench.md`.
 - Typecheck clean: `PushResult` exported, relay rng field, cas writeSync narrowing.
 - 30 audit suspects fixed: relay fail-closed persist (no ack for unwritten events, ack only stored ids), store seq-vs-id collision no longer swallowed, fractional nominal rejected, sync dead-letter cursors (one poison event never pins push/pull), retain empty-guard returns 0, revokelog convergent tie-break, tombstone guard covers show/target, quota remaining clamped, canonical payload key order, duplicate-id append rejected, seq-gap verification, device mismatch throws (first-explicit adoption allowed), threshold misconfig throws, cas orphan sweep + EEXIST tolerance + fstat + guarded quarantine, deltasync real dead-letter list + honest fetched metric.
 - Kernel split healing is O(1) steady-state (suspect flag + open-time replay); undo/settle stay blind compensators (peer targets may sync later — model-oracle pins this).
