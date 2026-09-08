@@ -3,6 +3,15 @@
 All entries describe user-visible changes shipped under each tag, in tag order.
 Untagged commits are folded into the next tag that shipped them.
 
+
+## Unreleased (v0.13.0) — audit + perf waves
+
+- Typecheck clean: `PushResult` exported, relay rng field, cas writeSync narrowing.
+- 30 audit suspects fixed: relay fail-closed persist (no ack for unwritten events, ack only stored ids), store seq-vs-id collision no longer swallowed, fractional nominal rejected, sync dead-letter cursors (one poison event never pins push/pull), retain empty-guard returns 0, revokelog convergent tie-break, tombstone guard covers show/target, quota remaining clamped, canonical payload key order, duplicate-id append rejected, seq-gap verification, device mismatch throws (first-explicit adoption allowed), threshold misconfig throws, cas orphan sweep + EEXIST tolerance + fstat + guarded quarantine, deltasync real dead-letter list + honest fetched metric.
+- Kernel split healing is O(1) steady-state (suspect flag + open-time replay); undo/settle stay blind compensators (peer targets may sync later — model-oracle pins this).
+- Perf: relay liveBuf dedupes via persistent Set, token verdicts cached per revoke size; `purgeRevoked` incremental via `sync.purge_seq` cursor + fingerprint; backoff jitter deterministic by default (opt-in random).
+- Suite: 218 tests green, tsc clean.
+
 ## v0.1.0 — offline kernel
 
 - Initial release: offline-first `createKernel({ file })` with `append` / `query` / `undo`, no network needed for local writes.

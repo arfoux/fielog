@@ -1,6 +1,6 @@
 {
   "name": "fielog",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Fieldlog — write anywhere, settle later. Offline-first append-log + SQLite read-model + sync.",
   "type": "module",
   "main": "src/index.ts",
