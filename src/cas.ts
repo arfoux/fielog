@@ -14,9 +14,11 @@ import {
   closeSync,
   existsSync,
   fsyncSync,
+  fstatSync,
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   unlinkSync,
@@ -78,6 +80,24 @@ export interface CasStore {
 function checkKey(key: string): void {
   if (!KEY_RE.test(key)) throw new Error(`bad cas key (want sha256 hex): ${key.slice(0, 32)}`);
 }
+/** Best-effort directory fsync so creates/renames survive a crash. Never throws. */
+function fsyncDir(path: string): void {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, 'r');
+    fsyncSync(fd);
+  } catch {
+    // Best effort: some platforms refuse dir fsync; durability hint only.
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Ignore close errors on a durability hint.
+      }
+    }
+  }
+}
 
 /** Atomic manifest persist: write tmp + fsync + rename, same cutover as retain.ts. */
 function persistManifest(dir: string, refs: Record<string, number>): void {
@@ -91,6 +111,7 @@ function persistManifest(dir: string, refs: Record<string, number>): void {
     closeSync(fd);
   }
   renameSync(tmp, path);
+  fsyncDir(dir);
 }
 
 /**
@@ -127,19 +148,33 @@ export function openCas(dir: string): CasStore {
   const store: CasStore & { quarantined: number } = {
     dir,
     quarantined: 0,
-
     put(data: Uint8Array | string): string {
       const key = casKeyFor(data);
       const blob = casPathFor(dir, key);
-      if (!existsSync(blob)) {
-        mkdirSync(dirname(blob), { recursive: true });
-        const fd = openSync(blob, 'wx');
+      mkdirSync(dirname(blob), { recursive: true });
+      for (let attempt = 0; ; attempt += 1) {
         try {
-          if (typeof data === 'string') writeSync(fd, data);
-          else writeSync(fd, data);
-          fsyncSync(fd);
-        } finally {
-          closeSync(fd);
+          const fd = openSync(blob, 'wx');
+          try {
+            if (typeof data === 'string') writeSync(fd, data);
+            else writeSync(fd, data);
+            fsyncSync(fd);
+          } finally {
+            closeSync(fd);
+          }
+          fsyncDir(dirname(blob));
+          break;
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException)?.code;
+          // Concurrent same-key winner already created the blob: adopt it.
+          // Windows reports the loser as EPERM/EACCES/EBUSY when the winner
+          // still holds the file, so those mean EEXIST when the blob exists.
+          if (code === 'EEXIST') break;
+          if (code === 'EPERM' || code === 'EACCES' || code === 'EBUSY') {
+            if (existsSync(blob)) break;
+            if (attempt < 2) continue;
+          }
+          throw err;
         }
       }
       refs[key] = (refs[key] ?? 0) + 1;
@@ -159,7 +194,36 @@ export function openCas(dir: string): CasStore {
         return null;
       }
       if (casKeyFor(bytes) !== key) {
-        renameSync(blob, casQuarantinePathFor(dir, key));
+        const qpath = casQuarantinePathFor(dir, key);
+        try {
+          mkdirSync(dirname(qpath), { recursive: true });
+          renameSync(blob, qpath);
+        } catch (err) {
+          const code = (err as NodeJS.ErrnoException)?.code;
+          if (code === 'EEXIST' || code === 'EPERM') {
+            // A previous quarantine already occupies the sidecar (Windows
+            // rename refuses to overwrite): drop the loser copy rather than
+            // serving corrupt bytes or throwing on the data path.
+            try {
+              unlinkSync(qpath);
+              renameSync(blob, qpath);
+            } catch {
+              try {
+                unlinkSync(blob);
+              } catch {
+                // Blob already gone; refs cleanup below still applies.
+              }
+            }
+          } else if (code !== 'ENOENT') {
+            try {
+              unlinkSync(blob);
+            } catch {
+              // Blob already gone; refs cleanup below still applies.
+            }
+          }
+        }
+        fsyncDir(dirname(blob));
+        fsyncDir(dirname(qpath));
         delete refs[key];
         persistManifest(dir, refs);
         store.quarantined += 1;
@@ -178,8 +242,23 @@ export function openCas(dir: string): CasStore {
       const n = refs[key];
       if (n === undefined) return null;
       const blob = casPathFor(dir, key);
-      if (!existsSync(blob)) return null;
-      return { key, size: readFileSync(blob).length, refcount: n };
+      let fd: number | undefined;
+      try {
+        fd = openSync(blob, 'r');
+        const size = fstatSync(fd).size;
+        return { key, size, refcount: n };
+      } catch {
+        // Blob missing or unreadable between the refs check and now.
+        return null;
+      } finally {
+        if (fd !== undefined) {
+          try {
+            closeSync(fd);
+          } catch {
+            // Ignore close errors on a read-only stat probe.
+          }
+        }
+      }
     },
 
     link(key: string): void {
@@ -210,6 +289,34 @@ export function openCas(dir: string): CasStore {
       for (const key of Object.keys(refs)) {
         if (!existsSync(casPathFor(dir, key))) {
           delete refs[key];
+          dead.push(key);
+        }
+      }
+      // Crash window: the blob was exclusively created but the manifest
+      // never named it (kill between blob write and persist). Sweep blobs
+      // with no ref entry so they never leak silently.
+      let shards: string[] = [];
+      try {
+        shards = readdirSync(join(dir, 'sha'));
+      } catch {
+        shards = [];
+      }
+      for (const shard of shards) {
+        let names: string[] = [];
+        try {
+          names = readdirSync(join(dir, 'sha', shard));
+        } catch {
+          continue;
+        }
+        for (const rest of names) {
+          const key = shard + rest;
+          if (!KEY_RE.test(key)) continue;
+          if (key in refs) continue;
+          try {
+            unlinkSync(join(dir, 'sha', shard, rest));
+          } catch {
+            continue;
+          }
           dead.push(key);
         }
       }

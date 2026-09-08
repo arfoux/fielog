@@ -7,6 +7,30 @@
 //   4. apply: each fetched event appends under a fresh local seq, idempotent by UUID.
 //   5. resume: want-list progress persists per chunk in store meta; a cut
 //      re-runs from the persisted remainder (plus any new manifest ids).
+//   6. dead-letter: a shape-invalid (poison) event is recorded by UUID in
+//      store meta (`<cursorKey>.dead`) and never refetched on later runs;
+//      the want-list still drains past it, so one bad write can never
+//      brick sync or retry forever.
+//
+// Origin-auth stripping contract (interop audit — every implementation MUST
+// match this, byte for byte in effect):
+//   - The receiver NEVER copies the sender's auth envelope or chain position:
+//     remote.signature, remote.countersignatures, remote.seq,
+//     remote.prev_hash, and remote.hash are all dropped on the floor, as is
+//     the sender's device_id as an owner (it is kept only as origin_device).
+//   - The local append mints a fresh local seq, prev_hash, hash, and
+//     device_id (the receiver's own deviceId); the local signer (if any)
+//     re-signs the re-hashed event. Keeping the origin signature would fail
+//     verification under the local device_id and brick relayed pulls.
+//   - Preserved verbatim as audit/display metadata: type, payload, actor,
+//     ts_device (origin wall clock, display only — NEVER authoritative),
+//     origin_seq (= remote.seq), origin_device (= remote.device_id).
+//     server_time is NOT carried over (it is excluded from the hash on
+//     purpose; the receiver keeps its own clock view).
+//   - No signature verification happens here: peers are trusted replicas
+//     (same operator). Forgery-gated pull with a device registry stays on
+//     the sync.ts path (pullRemote); this file does shape validation
+//     (checkAppend) but no signature verification.
 //
 // Transport is a DeltaPeer { manifest, fetch } — memory, file, or ws backed.
 // Trust note: peers here are trusted replicas (same operator). Forgery-gated
@@ -46,10 +70,12 @@ export interface DeltaOpts {
 export interface DeltaResult {
   /** UUIDs missing locally at plan time (before this run's applies). */
   wanted: number;
-  /** events fetched from the peer this run. */
+  /** requested UUIDs matched by the peer's fetch replies this run. */
   fetched: number;
   /** events newly applied to the local log+store this run. */
   applied: number;
+  /** shape-invalid UUIDs dead-lettered this run (recorded, never refetched). */
+  poisoned: number;
   /** true when this run continued persisted want-list progress. */
   resumed: boolean;
   /** true when nothing remains (local has every manifest id). */
@@ -109,6 +135,22 @@ function loadPersistedWant(store: EventStore, cursorKey: string): string[] {
 function savePersistedWant(store: EventStore, cursorKey: string, want: string[]): void {
   store.setMeta(`${cursorKey}.want`, JSON.stringify(want));
 }
+/** UUIDs already judged shape-invalid: recorded, never refetched. */
+function loadDeadSet(store: EventStore, cursorKey: string): Set<string> {
+  const raw = store.getMeta(`${cursorKey}.dead`);
+  if (!raw) return new Set();
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((x): x is string => typeof x === 'string' && x !== ''));
+  } catch {
+    return new Set();
+  }
+}
+
+function saveDeadSet(store: EventStore, cursorKey: string, dead: Set<string>): void {
+  store.setMeta(`${cursorKey}.dead`, JSON.stringify([...dead]));
+}
 /** Merge persisted remainder with a fresh want-list; manifest order wins. */
 function mergeWant(persisted: string[], fresh: string[], freshOrder: string[]): string[] {
   const freshSet = new Set(fresh);
@@ -124,9 +166,11 @@ function mergeWant(persisted: string[], fresh: string[], freshOrder: string[]): 
   merged.sort((a, b) => (order.get(a) ?? 1e12) - (order.get(b) ?? 1e12));
   return merged;
 }
-
-/** Validate + append one remote event locally. */
 type ApplyOutcome = 'applied' | 'duplicate' | 'poison' | 'retry';
+
+// Validate + append one remote event locally. Origin-auth stripping: the
+// local append mints a fresh seq/hash/device_id; the origin survives only
+// as origin_seq/origin_device audit metadata (see file header contract).
 function applyOneRemote(
   log: AppendLog,
   store: EventStore,
@@ -193,26 +237,34 @@ export async function syncDelta(
   if (!manifest || manifest.v !== 1 || !Array.isArray(manifest.ids)) {
     throw new Error('syncDelta: bad manifest (want { v: 1, ids: string[] })');
   }
-  const persisted = loadPersistedWant(store, cursorKey);
-  const fresh = computeWant(localIdSet(log), manifest);
+  const dead = loadDeadSet(store, cursorKey);
+  const persisted = loadPersistedWant(store, cursorKey).filter((id) => !dead.has(id));
+  const fresh = computeWant(localIdSet(log), manifest).filter((id) => !dead.has(id));
   const persistedLive = persisted.filter((id) => !store.hasId(id) && !log.hasId(id));
   const want = persistedLive.length > 0 ? mergeWant(persistedLive, fresh, manifest.ids) : fresh;
   const resumed = persistedLive.length > 0;
   const wanted = want.length;
   if (want.length === 0) {
     savePersistedWant(store, cursorKey, []);
-    return { wanted: 0, fetched: 0, applied: 0, resumed, done: true };
+    return { wanted: 0, fetched: 0, applied: 0, poisoned: 0, resumed, done: true };
   }
   let fetched = 0;
   let applied = 0;
+  let poisoned = 0;
   let remainder = [...want];
   let idle = 0;
-  // Persist the plan before fetching so a kill during chunk 1 still resumes.
-  savePersistedWant(store, cursorKey, remainder);
   while (remainder.length > 0) {
     const chunk = remainder.slice(0, chunkSize);
-    const events = await withBackoff(() => peer.fetch(chunk), opts);
-    fetched += events.length;
+    const chunkSet = new Set(chunk);
+    const events = (await withBackoff(() => peer.fetch(chunk), opts)) ?? [];
+    // Requested ids only: a peer that volunteers extra (or duplicate) lines
+    // must not inflate the metric — count each requested UUID once.
+    const matched = new Set<string>();
+    for (const e of events) {
+      const id = e?.id;
+      if (typeof id === 'string' && chunkSet.has(id)) matched.add(id);
+    }
+    fetched += matched.size;
     const appliedBefore = applied;
     const before = remainder.length;
     const byId = new Map(events.map((e) => [e?.id, e]));
@@ -225,16 +277,26 @@ export async function syncDelta(
       }
       const outcome = applyOneRemote(log, store, deviceId, remote);
       if (outcome === 'applied') applied += 1;
-      if (outcome === 'retry') hold.push(id);
+      else if (outcome === 'retry') hold.push(id);
+      else if (outcome === 'poison') {
+        // Real dead-letter: record the UUID so later runs never refetch it.
+        // The want-list still drains past it (never pins, never retries).
+        if (!dead.has(id)) {
+          dead.add(id);
+          poisoned += 1;
+          saveDeadSet(store, cursorKey, dead);
+        }
+      }
+      // 'duplicate' needs nothing: already stored, drop from the remainder.
     }
     remainder = [...hold, ...remainder.slice(chunkSize)];
     savePersistedWant(store, cursorKey, remainder);
     if (remainder.length >= before && applied === appliedBefore) {
       idle += 1;
-      if (idle >= 2) return { wanted, fetched, applied, resumed, done: false };
+      if (idle >= 2) return { wanted, fetched, applied, poisoned, resumed, done: false };
     } else {
       idle = 0;
     }
   }
-  return { wanted, fetched, applied, resumed, done: true };
+  return { wanted, fetched, applied, poisoned, resumed, done: true };
 }

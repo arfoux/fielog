@@ -27,6 +27,7 @@ export interface TruncateMarker {
 export function isMarker(o: unknown): o is TruncateMarker {
   if (!o || typeof o !== 'object') return false;
   if (!('marker' in o) || o.marker !== 'fielog-truncate') return false;
+  if (!('v' in o) || o.v !== 1) return false;
   return (
     'tip' in o &&
     typeof o.tip === 'string' &&
@@ -73,19 +74,35 @@ export interface AppendInput {
   countersignatures?: Array<{ deviceId: string; signatureHex: string }>;
 }
 
-/** Canonical bytes covered by the hash chain (server_time excluded on purpose). */
-export function canonicalOf(e: Omit<LogEvent, 'hash'>): string {
-  return JSON.stringify({
-    id: e.id,
-    seq: e.seq,
-    type: e.type,
-    actor: e.actor ?? null,
-    device_id: e.device_id,
-    ts_device: e.ts_device,
-    payload: e.payload,
-    prev_hash: e.prev_hash,
-  });
+/** Deep key-sorted copy of JSON data so identical payloads hash identically
+ * regardless of key insertion order across devices. Arrays keep their order
+ * (they are sequences, not sets); non-plain objects keep JSON semantics. */
+function canonicalValue(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(canonicalValue);
+  if (v !== null && typeof v === 'object') {
+    const proto = Object.getPrototypeOf(v);
+    if (proto !== Object.prototype && proto !== null) return v;
+    const src = v as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(src).sort()) out[k] = canonicalValue(src[k]);
+    return out;
+  }
+  return v;
 }
+
+ /** Canonical bytes covered by the hash chain (server_time excluded on purpose). */
+ export function canonicalOf(e: Omit<LogEvent, 'hash'>): string {
+   return JSON.stringify({
+     id: e.id,
+     seq: e.seq,
+     type: e.type,
+     actor: e.actor ?? null,
+     device_id: e.device_id,
+     ts_device: e.ts_device,
+    payload: canonicalValue(e.payload),
+     prev_hash: e.prev_hash,
+   });
+ }
 
 export function hashFor(e: Omit<LogEvent, 'hash'>): string {
   return createHash('sha256').update(canonicalOf(e), 'utf8').digest('hex');
@@ -211,6 +228,9 @@ export function openLog(path: string, defaultDeviceId: string, signer?: (ev: Log
       if (!input.type || typeof input.type !== 'string') {
         throw new Error('log.append: type must be a non-empty string');
       }
+      if (input.id !== undefined && byId.has(input.id)) {
+        throw new Error(`log.append: duplicate id ${input.id}`);
+      }
       const core: Omit<LogEvent, 'hash'> = {
         id: input.id ?? randomUUID(),
         seq: nextSeq,
@@ -260,6 +280,7 @@ export function openLog(path: string, defaultDeviceId: string, signer?: (ev: Log
     },
     verify(): VerifyResult {
       let prev = marker?.tip ?? GENESIS_HASH; // swept prefix re-anchors here
+      let expectedSeq = marker?.truncated_before ?? 1; // seqs run contiguously from here
       const gaps: number[] = [];
       for (const e of events) {
         const { hash, signature: _s, countersignatures: _c, ...core } = e;
@@ -268,13 +289,30 @@ export function openLog(path: string, defaultDeviceId: string, signer?: (ev: Log
         if (hashFor(core) !== hash) {
           return { ok: false, at: e.seq, reason: 'hash mismatch (tampered payload?)' };
         }
+        // A re-chained survivor hides a surgically removed prefix/suffix from
+        // the prev_hash check, so seq continuity is enforced too. Only a
+        // forward jump onto a quarantined gap is forgiven (re-anchored below).
+        const seqForgiven = e.seq > expectedSeq && gapBefore.has(e.seq);
+        if (e.seq !== expectedSeq && !seqForgiven) {
+          return {
+            ok: false,
+            at: e.seq,
+            reason:
+              e.seq < expectedSeq
+                ? 'duplicate seq (forked/edited log?)'
+                : 'seq gap (truncated/edited log?)',
+          };
+        }
         if (e.prev_hash !== prev) {
           if (!gapBefore.has(e.seq)) {
             return { ok: false, at: e.seq, reason: 'prev_hash mismatch (truncated/edited log?)' };
           }
+        }
+        if (seqForgiven || e.prev_hash !== prev) {
           gaps.push(e.seq); // known gap: predecessor was quarantined, re-anchor
         }
         prev = hash;
+        expectedSeq = e.seq + 1;
       }
       return gaps.length > 0 ? { ok: true, gaps } : { ok: true };
     },

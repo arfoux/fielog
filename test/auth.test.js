@@ -48,10 +48,12 @@ describe('auth', () => {
   it('countersign threshold counts distinct valid devices', async () => {
     const a = generateDeviceKey();
     const b = generateDeviceKey();
+    const c = generateDeviceKey();
     const stranger = generateDeviceKey();
     const registry = new Map([
       [a.deviceId, a.publicKeyPem],
       [b.deviceId, b.publicKeyPem],
+      [c.deviceId, c.publicKeyPem],
     ]);
     const e = ev('big');
     const sigs = [countersignEvent(a.privateKeyPem, a.deviceId, e), countersignEvent(b.privateKeyPem, b.deviceId, e)];

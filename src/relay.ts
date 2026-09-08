@@ -70,6 +70,8 @@ export class WsRelayServer {
   private revoked = new Set<string>(); // deviceIds; tombstones broadcast + persisted
   /** Convergent authenticated revoke log (revokelog.ts); empty when no admin configured. */
   readonly revokes = new RevokeLog();
+  private revokedDevices = new Set<string>(); // device-tombstone cache, valid while revokes.size is stable
+  private revokedDevicesAt = -1;
   serverTime = 1_700_000_000_000;
   pushesReceived = 0;
   pullsReceived = 0;
@@ -252,6 +254,10 @@ export class WsRelayServer {
   }
 
   async start(): Promise<number> {
+    // Double-start guard: a second serve would orphan the first listener and
+    // leak its log fd (kill() only tracks the latest). Start once; kill, then
+    // start again for a deliberate restart.
+    if (this.server) throw new Error('relay already started');
     // Fail closed: an unsigned relay accepts any forged device_id, so
     // production entrypoints must register a device or opt into --unsigned.
     if (!this.enforcing && this.opts.allowUnsigned === false) {
@@ -329,7 +335,9 @@ export class WsRelayServer {
 
   private persist(evs: LogEvent[]): void {
     if (!this.opts.file || evs.length === 0) return;
-    if (this.logFd === null) return;
+    // Fail closed: a configured log with no open fd must never be acked as
+    // durable. Throw so the push path answers error instead of push_ack.
+    if (this.logFd === null) throw new Error('relay persist unavailable: event log not open, refusing to ack unwritten events');
     writeSync(this.logFd, evs.map((e) => JSON.stringify(e)).join('\n') + '\n');
     fsyncSync(this.logFd); // durable before any ack: restart loses nothing
   }
@@ -369,10 +377,12 @@ export class WsRelayServer {
     if (msg.op === 'revoke_push') {
       this.revokePushesReceived += 1;
       const batch = Array.isArray(msg.events) ? msg.events : [];
-      const known = new Set(this.revokes.snapshot().map((e) => e.hash));
+      // No snapshot sorts here: merge only appends, so the pre-merge size is
+      // the exact cursor of the fresh suffix — diffSince slices it for free.
+      const cursorBefore = this.revokes.size;
       const res = this.revokes.merge(batch);
       this.revokeRejected += res.rejected;
-      this.persistRevokes(this.revokes.snapshot().filter((e) => !known.has(e.hash)));
+      this.persistRevokes(this.revokes.diffSince(cursorBefore).events);
       this.send(ws, { op: 'revoke_ack', req: msg.req, added: res.added, skipped: res.skipped, rejected: res.rejected, cursor: this.revokes.size });
       return;
     }
@@ -386,7 +396,13 @@ export class WsRelayServer {
     // but no ack/response goes out and the socket dies — the client must
     // resume and the UUID dedupe must hold.
     if ((this.opts.dropRate ?? 0) > 0 && this.rng() < (this.opts.dropRate ?? 0)) {
-      if (msg.op === 'push') this.store(msg.events);
+      if (msg.op === 'push' && Array.isArray(msg.events)) {
+        try {
+          this.store(msg.events);
+        } catch {
+          /* persist failed: stay unacked, the socket dies below, client resumes */
+        }
+      }
       try {
         ws.close();
       } catch {
@@ -396,7 +412,20 @@ export class WsRelayServer {
     }
     if (msg.op === 'push') {
       this.pushesReceived += 1;
-      const fresh = this.store(msg.events);
+      if (!Array.isArray(msg.events)) {
+        this.send(ws, { op: 'error', req: msg.req, code: 'bad_batch', message: 'relay rejected push: events must be an array' });
+        return;
+      }
+      let fresh: LogEvent[];
+      try {
+        fresh = this.store(msg.events);
+      } catch (err) {
+        // Persist failed (e.g. log fd gone): nothing below is durable, so
+        // answer error instead of acking unwritten events. The client keeps
+        // the batch unacked and resumes it elsewhere.
+        this.send(ws, { op: 'error', req: msg.req, code: 'persist', message: `relay rejected push: ${err instanceof Error ? err.message : 'persist failed'}` });
+        return;
+      }
       this.serverTime += 1;
       this.broadcast(fresh, ws);
       if (this.crashAfter !== null) {
@@ -407,7 +436,11 @@ export class WsRelayServer {
           return;
         }
       }
-      this.send(ws, { op: 'push_ack', req: msg.req, acked: msg.events.map((e) => e.id), server_time: this.serverTime });
+      // Ack only ids confirmed stored (fresh or already-known duplicates):
+      // never blind-echo the inbound batch, so intra-batch repeats collapse
+      // to one ack and unwritten ids are never acked.
+      const acked = [...new Set(msg.events.map((e) => e.id).filter((id) => this.byId.has(id)))];
+      this.send(ws, { op: 'push_ack', req: msg.req, acked, server_time: this.serverTime });
     } else if (msg.op === 'pull') {
       this.pullsReceived += 1;
       const events = this.order.slice(msg.since);
@@ -428,8 +461,22 @@ export class WsRelayServer {
       return false;
     };
     if (!token) return fail('missing capability token');
-    if (this.revoked.has(token.deviceId) || this.isDeviceRevokedByLog(token.deviceId)) {
-      return fail(`device revoked: ${token.deviceId}`);
+    if (this.revoked.has(token.deviceId)) return fail(`device revoked: ${token.deviceId}`);
+    if (this.revokes.size > 0) {
+      // Device-tombstone set cached while the revoke log length is stable:
+      // one sort per mutation, not one per gated message. (Empty log needs
+      // no sort at all — nothing can match.)
+      if (this.revokedDevicesAt !== this.revokes.size) {
+        const ids = new Set<string>();
+        for (const e of this.revokes.snapshot()) {
+          if (e.tokenId === '*') ids.add(e.deviceId);
+        }
+        this.revokedDevices = ids;
+        this.revokedDevicesAt = this.revokes.size;
+      }
+      if (this.revokedDevices.has(token.deviceId)) {
+        return fail(`device revoked: ${token.deviceId}`);
+      }
     }
     if (token.id && this.revokes.isRevoked(token.id)) return fail(`token revoked: ${token.id}`);
     const pem = this.devices.get(token.deviceId);
@@ -448,7 +495,16 @@ export class WsRelayServer {
         fresh.push(ev);
       }
     }
-    this.persist(fresh); // write-ahead: durable before any ack
+    try {
+      this.persist(fresh); // write-ahead: durable before any ack
+    } catch (err) {
+      // Persist failed: roll back the in-memory index so nothing looks
+      // stored. The push path answers error (never acks), and the client's
+      // retry lands here as fresh again.
+      for (const ev of fresh) this.byId.delete(ev.id);
+      this.order.splice(this.order.length - fresh.length, fresh.length);
+      throw err;
+    }
     return fresh;
   }
 
@@ -466,7 +522,12 @@ export class WsRelayServer {
   }
 
   private send(ws: ServerWebSocket<SockState>, msg: ToClient): void {
-    ws.send(JSON.stringify(msg));
+    try {
+      ws.send(JSON.stringify(msg));
+    } catch {
+      /* gone — same best-effort policy as broadcast: never let a dead socket
+         take down the message loop with an uncaught throw */
+    }
   }
 }
 
@@ -485,6 +546,9 @@ interface Inflight {
   reject: (e: Error) => void;
   timer: Timer;
 }
+/** Cap on buffered live-broadcast hints per client. Pull is the source of
+ * truth; hints must not grow without bound when the client never pulls. */
+export const MAX_LIVE_HINTS = 1000;
 
 /** Relay over a real socket: reconnects with backoff+jitter, resumes via cursors. */
 export class WsRelayClient implements Relay {
@@ -596,6 +660,11 @@ export class WsRelayClient implements Relay {
           this.liveBuf.push(ev);
         }
       }
+      // Bound the hint buffer: oldest hints drop first, pull stays the source
+      // of truth so nothing is lost — the next pull re-covers the gap.
+      if (this.liveBuf.length > MAX_LIVE_HINTS) {
+        this.liveBuf.splice(0, this.liveBuf.length - MAX_LIVE_HINTS);
+      }
       return;
     }
     if (msg.op === 'revoked') {
@@ -682,6 +751,11 @@ export class WsRelayClient implements Relay {
    */
   async syncRevokes(): Promise<{ added: number; skipped: number; rejected: number; serverCursor: number }> {
     const total = { added: 0, skipped: 0, rejected: 0 };
+    // Snapshot the locally-authored tail BEFORE absorbing: anything merged
+    // from the server below is already stored on the relay, and offering it
+    // back would echo a perpetual tail (every handshake re-pushes the events
+    // the previous handshake absorbed).
+    const tail = this.revokes.diffSince(this.revokeUpTo).events;
     const absorb = async (): Promise<void> => {
       let res: { events: RevokeEvent[]; cursor: number };
       try {
@@ -698,13 +772,15 @@ export class WsRelayClient implements Relay {
       this.revokeServerCursor = res.cursor;
     };
     await absorb();
-    const tail = this.revokes.diffSince(this.revokeUpTo).events;
     const ack = await this.pushRevokes(tail);
     total.added += ack.added;
     total.skipped += ack.skipped;
     total.rejected += ack.rejected;
     this.revokeUpTo = this.revokes.size;
     await absorb();
+    // The second absorb only merges server-originated events the relay
+    // already stores — mark them offered so the next handshake is quiet.
+    this.revokeUpTo = this.revokes.size;
     this.revokeSyncs += 1;
     this.revokeRejected += total.rejected;
     return { ...total, serverCursor: this.revokeServerCursor };

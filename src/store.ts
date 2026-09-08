@@ -71,8 +71,8 @@ export function checkAppend(type: string, payload: Record<string, unknown>): voi
   const p = payload ?? {};
   if (type === 'bayar') {
     const nominal = Number(p['nominal']);
-    if (!Number.isFinite(nominal) || nominal <= 0) {
-      throw new Error(`bayar rejected: nominal must be a positive number (got ${String(p['nominal'])})`);
+    if (!Number.isFinite(nominal) || !Number.isInteger(nominal) || nominal <= 0) {
+      throw new Error(`bayar rejected: nominal must be a positive integer (got ${String(p['nominal'])})`);
     }
     const state = String(p['state'] ?? MoneyState.IOU_RECORDED);
     if (!MONEY_APPEND_STATES[state]) {
@@ -145,10 +145,17 @@ CREATE TABLE IF NOT EXISTS records(
 );
 `;
 
+export interface ReplayResult {
+  /** Events durably applied by this call (idempotent replays excluded). */
+  applied: number;
+  /** Poison events rolled back alone so the tail behind them still applied. */
+  skipped: number;
+}
+
 export interface EventStore {
   apply(ev: LogEvent): void;
   /** Catch-up apply of events missing locally; never deletes (truncate-safe). */
-  replay(events: LogEvent[]): void;
+  replay(events: LogEvent[]): ReplayResult;
   /**
    * Delete read-model rows for seqs the log no longer carries (quarantined),
    * forgiving the swept prefix below `forgiveBelow`. Returns excised count.
@@ -169,7 +176,9 @@ export function openStore(path: string): EventStore {
   db.exec(SCHEMA);
 
   function insertRaw(ev: LogEvent): boolean {
-    // Idempotent by UUID: replays / pulled duplicates are no-ops.
+    // Idempotent by UUID: replays / pulled duplicates are no-ops. But a seq
+    // collision under a FRESH id is chain corruption, never a replay — it
+    // must fail loud instead of silently dropping the event.
     try {
       run(
         db,
@@ -188,7 +197,13 @@ export function openStore(path: string): EventStore {
       );
       return true;
     } catch (err) {
-      if (String((err as Error)?.message ?? err).includes('UNIQUE')) return false;
+      const msg = String((err as Error)?.message ?? err);
+      if (!msg.includes('UNIQUE') && !msg.includes('PRIMARY')) throw err;
+      if (msg.includes('_events.id')) return false; // idempotent replay by UUID
+      // Exact re-inserts can trip the seq check first: still a replay when
+      // THIS id is already stored. A fresh id on a taken seq is corruption.
+      const known = all(db, `SELECT 1 FROM _events WHERE id = ? LIMIT 1`, ev.id).length > 0;
+      if (known) return false;
       throw err;
     }
   }
@@ -203,8 +218,12 @@ export function openStore(path: string): EventStore {
         detail,
         JSON.stringify(eventIds),
       );
-    } catch {
-      /* same conflict re-applied during replay — keep the first row */
+    } catch (err) {
+      // Same conflict re-applied during replay — keep the first row. Anything
+      // else (disk full, IO, locking) must surface, never swallow.
+      const msg = String((err as Error)?.message ?? err);
+      if (msg.includes('UNIQUE') || msg.includes('PRIMARY')) return;
+      throw err;
     }
   }
 
@@ -422,6 +441,54 @@ export function openStore(path: string): EventStore {
     }
   }
 
+  /**
+   * Forensic quarantine for a corrupt _events row, mirroring sync.ts: the
+   * _events row stays (reopen replay stays a no-op by UUID) while the domain
+   * views stop serving it. Schema matches ensureQuarantine in sync.ts.
+   * Best-effort on a read path: never throws.
+   */
+  function quarantineCorruptRow(r: { id: string; seq: number }): void {
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        run(
+          db,
+          `CREATE TABLE IF NOT EXISTS _quarantine(event_id TEXT PRIMARY KEY, reason TEXT NOT NULL, ts INTEGER NOT NULL, event TEXT NOT NULL)`,
+        );
+        const raw = all<Record<string, unknown>>(db, `SELECT * FROM _events WHERE id = ?`, r.id);
+        run(
+          db,
+          `INSERT OR IGNORE INTO _quarantine(event_id, reason, ts, event) VALUES(?,?,?,?)`,
+          r.id,
+          `corrupt-payload seq=${r.seq}`,
+          Date.now(),
+          raw.length ? JSON.stringify(raw[0]) : r.id,
+        );
+        run(db, `DELETE FROM bayar WHERE event_id = ?`, r.id);
+        const m = all<{ n: number }>(db, `SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = ?`, r.id);
+        run(db, `DELETE FROM stock_moves WHERE event_id = ?`, r.id);
+        run(db, `DELETE FROM records WHERE event_id = ?`, r.id);
+        if ((m[0]?.n ?? 0) > 0) {
+          // Balances derive from moves: rebuild atomically with the purge.
+          db.exec(`DELETE FROM stock`);
+          run(
+            db,
+            `INSERT INTO stock(item, qty) SELECT item, SUM(qty) FROM stock_moves WHERE voided = 0 GROUP BY item`,
+          );
+        }
+        db.exec('COMMIT');
+      } catch {
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          /* already rolled back */
+        }
+      }
+    } catch {
+      /* read path: the row is still unreadable, so callers see absence */
+    }
+  }
+
   const store: EventStore = {
     apply(ev: LogEvent): void {
       // Atomic: _events row + routed rows commit together. A kill between
@@ -443,11 +510,14 @@ export function openStore(path: string): EventStore {
         throw err;
       }
     },
-    replay(events: LogEvent[]): void {
+    replay(events: LogEvent[]): ReplayResult {
       // Incremental only: the store can hold events the log no longer carries
       // (post-truncate). Clearing here would wipe a healthy read-model.
       // Per-event transaction: one poison event rolls back alone instead of
-      // starving the tail behind it.
+      // starving the tail behind it. The skip count is returned so callers
+      // can surface poison instead of silently losing it.
+      let applied = 0;
+      let skipped = 0;
       for (const ev of [...events].sort((a, b) => a.seq - b.seq)) {
         db.exec('BEGIN IMMEDIATE');
         try {
@@ -457,35 +527,53 @@ export function openStore(path: string): EventStore {
           }
           route(ev);
           db.exec('COMMIT');
+          applied += 1;
         } catch {
           try {
             db.exec('ROLLBACK');
           } catch {
             /* already rolled back */
           }
+          skipped += 1;
         }
       }
+      return { applied, skipped };
     },
     exciseMissing(kept: number[], forgiveBelow: number): number {
       const have = new Set(kept);
       const rows = all<{ seq: number; id: string }>(db, `SELECT seq, id FROM _events`);
       const gone = rows.filter((r) => !have.has(r.seq) && r.seq >= forgiveBelow);
-      let moves = 0;
-      for (const g of gone) {
-        run(db, `DELETE FROM bayar WHERE event_id = ?`, g.id);
-        const m = all<{ n: number }>(db, `SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = ?`, g.id);
-        if (m[0]?.n) moves += 1;
-        run(db, `DELETE FROM stock_moves WHERE event_id = ?`, g.id);
-        run(db, `DELETE FROM records WHERE event_id = ?`, g.id);
-        run(db, `DELETE FROM _events WHERE id = ?`, g.id);
-      }
-      if (moves > 0) {
-        // Balances derive from moves: rebuild so excised stock stops counting.
-        db.exec('DELETE FROM stock');
-        run(
-          db,
-          `INSERT INTO stock(item, qty) SELECT item, SUM(qty) FROM stock_moves WHERE voided = 0 GROUP BY item`,
-        );
+      if (gone.length === 0) return 0;
+      // One transaction: a failure mid-sweep (disk, lock, trigger) rolls the
+      // whole excise back instead of leaving half-deleted views behind, and
+      // the stock rebuild below commits atomically with the deletes above.
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        let moves = 0;
+        for (const g of gone) {
+          run(db, `DELETE FROM bayar WHERE event_id = ?`, g.id);
+          const m = all<{ n: number }>(db, `SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = ?`, g.id);
+          if (m[0]?.n) moves += 1;
+          run(db, `DELETE FROM stock_moves WHERE event_id = ?`, g.id);
+          run(db, `DELETE FROM records WHERE event_id = ?`, g.id);
+          run(db, `DELETE FROM _events WHERE id = ?`, g.id);
+        }
+        if (moves > 0) {
+          // Balances derive from moves: rebuild so excised stock stops counting.
+          db.exec('DELETE FROM stock');
+          run(
+            db,
+            `INSERT INTO stock(item, qty) SELECT item, SUM(qty) FROM stock_moves WHERE voided = 0 GROUP BY item`,
+          );
+        }
+        db.exec('COMMIT');
+      } catch (err) {
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          /* already rolled back */
+        }
+        throw err;
       }
       return gone.length;
     },
@@ -505,11 +593,24 @@ export function openStore(path: string): EventStore {
       }>(db, `SELECT * FROM _events WHERE id = ?`, id);
       if (!rows.length) return null;
       const r = rows[0];
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(r.payload) as Record<string, unknown>;
+      } catch {
+        payload = null as unknown as Record<string, unknown>;
+      }
+      if (payload === null || typeof payload !== 'object') {
+        // Corrupt _events payload (bit-rot, bad merge): quarantine the row —
+        // evidence kept, domain views purged — and report absence instead of
+        // throwing out of a read path (sync/tombstone call this in loops).
+        quarantineCorruptRow(r);
+        return null;
+      }
       return {
         seq: r.seq, id: r.id, type: r.type, actor: r.actor ?? undefined,
         device_id: r.device_id, ts_device: r.ts_device,
         server_time: r.server_time ?? undefined,
-        payload: JSON.parse(r.payload), hash: r.hash, prev_hash: r.prev_hash,
+        payload, hash: r.hash, prev_hash: r.prev_hash,
       };
     },
     hasId(id: string): boolean {

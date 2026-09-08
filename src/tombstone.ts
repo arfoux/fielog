@@ -44,6 +44,10 @@ export interface Hold {
   blocks: boolean;
 }
 
+/** A tombstone/target split: the target seq plus the tombstone-op seq the
+ *  seal would strand on the other side of the sweep boundary. `hide` keeps
+ *  its name for existing callers; it holds the op seq for a hide or a show.
+ */
 export interface SplitPair {
   target: number;
   hide: number;
@@ -54,7 +58,7 @@ export interface GuardReport {
   effective: number;
   /** Every hold on this replica and whether it blocked the sweep. */
   held: Hold[];
-  /** Hide/target pairs the seal would have split (clamped below both). */
+  /** Tombstone/target pairs the seal would have split (clamped below both). */
   pairs: SplitPair[];
 }
 
@@ -105,6 +109,12 @@ async function storedIds(k: Hider): Promise<Set<string>> {
  * `ERR_UNKNOWN_TARGET` before appending when the target is not stored, so a
  * typo never leaves a poison line behind. Hiding an already-hidden id is a
  * no-op-safe duplicate (fold keeps it hidden).
+ *
+ * NOTE: the stored-target check and the append are not atomic. Concurrent
+ * writers must serialize `hide()` calls (e.g. behind the kernel append
+ * lock); otherwise two racers can both pass the check and append duplicate
+ * hides. Duplicates are safe — the fold stays hidden — but callers needing
+ * exactly-one hide event must hold the lock across the call.
  */
 export async function hide(
   k: Hider,
@@ -172,10 +182,10 @@ export function holds(store: EventStore): Array<{ id: string; reason: string; se
 /**
  * GC-guard: clamp a truncate seal so it never (a) removes unacked/unapplied
  * data (via `clampSealToStored`), (b) sweeps a legally-held event, or
- * (c) splits a hide/target pair across the sweep boundary (a swept target
- * whose hide survives — or vice versa — would resurrect or orphan on
- * replay). Returns the safe seal plus exactly what forced it down, so the
- * caller can report held-vs-swept honestly instead of claiming deletion.
+ * (c) splits a tombstone/target pair across the sweep boundary (a swept
+ * target whose hide or show survives — or vice versa — would resurrect or
+ * orphan on replay). Returns the safe seal plus exactly what forced it down,
+ * so the caller can report held-vs-swept honestly instead of claiming deletion.
  */
 export function guardSeal(
   store: EventStore,
@@ -193,13 +203,14 @@ export function guardSeal(
       held.push({ ...h, blocks: false });
     }
   }
-  // Hide/target pairs sweep atomically: fixpoint, because clamping for one
-  // pair can expose a split in another.
+  // Tombstone/target pairs sweep atomically: fixpoint, because clamping for
+  // one pair can expose a split in another. Hides and shows both count — a
+  // swept target whose show survives (or vice versa) would resurrect or
+  // orphan on replay, same as a split hide.
   const pairs: SplitPair[] = [];
   for (;;) {
     let split: SplitPair | null = null;
     for (const op of listTombstones(store)) {
-      if (op.op !== 'hide') continue;
       const targetSeq = store.getEventById(op.target)?.seq;
       if (targetSeq === undefined || targetSeq === null) continue; // pair already gone
       const tIn = targetSeq <= effective;

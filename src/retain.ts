@@ -11,6 +11,7 @@ import {
   unlinkSync,
   writeSync,
 } from 'node:fs';
+import { dirname } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { isMarker } from './log.js';
 import type { EventStore } from './store.js';
@@ -31,6 +32,13 @@ export function snapshotPathFor(dbPath: string): string {
   return dbPath.replace(/\.(db|sqlite|sqlite3)$/, '') + '.snapshot.db';
 }
 
+/** Live db paths with a snapshot currently in flight. takeSnapshot is
+ * synchronous, so a present key means re-entrant or overlapping use — fail
+ * loud instead of interleaving two VACUUM INTO + stamp sequences over the
+ * same live db (the second copy would stamp live meta out from under the
+ * first, or vice versa). */
+const snapshotsInFlight = new Set<string>();
+
 /** Online full copy (VACUUM INTO) + seal stamp in both snapshot and live meta. */
 export function takeSnapshot(
   store: EventStore,
@@ -38,30 +46,71 @@ export function takeSnapshot(
   sealedSeq: number,
   dest?: string,
 ): SnapshotResult {
-  const snapshot = dest ?? snapshotPathFor(dbPath);
-  try {
-    unlinkSync(snapshot); // VACUUM INTO refuses an existing target
-  } catch {
-    /* fresh path */
+  if (snapshotsInFlight.has(dbPath)) {
+    throw new Error(
+      `ERR_SNAPSHOT_IN_FLIGHT: snapshot already in progress for '${dbPath}'; ` +
+        `finish it before starting another (overlapping copies would stamp live meta out of order)`,
+    );
   }
-  store.exec(`VACUUM INTO '${snapshot.replace(/'/g, "''")}'`);
-  const db = new Database(snapshot);
+  snapshotsInFlight.add(dbPath);
   try {
-    db.exec(
-      `INSERT INTO _meta(k,v) VALUES('snapshot.sealed_seq','${sealedSeq}') ` +
-        `ON CONFLICT(k) DO UPDATE SET v=excluded.v`,
-    );
-    db.exec(
-      `INSERT INTO _meta(k,v) VALUES('snapshot.at','${Date.now()}') ` +
-        `ON CONFLICT(k) DO UPDATE SET v=excluded.v`,
-    );
+    const snapshot = dest ?? snapshotPathFor(dbPath);
+    try {
+      unlinkSync(snapshot); // VACUUM INTO refuses an existing target
+    } catch {
+      /* fresh path */
+    }
+    store.exec(`VACUUM INTO '${snapshot.replace(/'/g, "''")}'`);
+    // Checkpoint BEFORE stamping: capture the observed read-model tip first,
+    // so every stamp below describes the same state the copy was taken from.
+    // A write landing between the copy and this read can only push dbSeq
+    // above the copy — never below — so the seal stays conservative.
+    const rows = store.query<{ m: number | null }>(`SELECT MAX(seq) AS m FROM _events`);
+    const dbSeq: number = rows[0]?.m ?? 0;
+    const db = new Database(snapshot);
+    try {
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        db.exec(
+          `INSERT INTO _meta(k,v) VALUES('snapshot.sealed_seq','${sealedSeq}') ` +
+            `ON CONFLICT(k) DO UPDATE SET v=excluded.v`,
+        );
+        db.exec(
+          `INSERT INTO _meta(k,v) VALUES('snapshot.at','${Date.now()}') ` +
+            `ON CONFLICT(k) DO UPDATE SET v=excluded.v`,
+        );
+        db.exec('COMMIT');
+      } catch (err) {
+        try {
+          db.exec('ROLLBACK');
+        } catch {
+          /* already torn down — report the original failure */
+        }
+        throw err;
+      }
+    } finally {
+      db.close();
+    }
+    // Both live stamps in one transaction: a crash must never leave
+    // snapshot.path pointing at a copy whose seal differs from
+    // snapshot.sealed_seq.
+    store.exec('BEGIN IMMEDIATE');
+    try {
+      store.setMeta('snapshot.path', snapshot);
+      store.setMeta('snapshot.sealed_seq', String(sealedSeq));
+      store.exec('COMMIT');
+    } catch (err) {
+      try {
+        store.exec('ROLLBACK');
+      } catch {
+        /* already torn down — report the original failure */
+      }
+      throw err;
+    }
+    return { snapshot, sealedSeq, dbSeq };
   } finally {
-    db.close();
+    snapshotsInFlight.delete(dbPath);
   }
-  store.setMeta('snapshot.path', snapshot);
-  store.setMeta('snapshot.sealed_seq', String(sealedSeq));
-  const rows = store.query<{ m: number | null }>(`SELECT MAX(seq) AS m FROM _events`);
-  return { snapshot, sealedSeq, dbSeq: rows[0]?.m ?? 0 };
 }
 
 /**
@@ -77,10 +126,15 @@ export function clampSealToStored(
   sealed: number,
   ackSeq: number,
 ): number {
+  // An empty read-model proves nothing applied: seal/ack cursors alone must
+  // never authorize a sweep, so report 0 (no-op) instead of min(sealed, ack).
+  // Same when the log holds nothing at/below the seal — there is no proven
+  // applied prefix to sweep.
+  if (logSeqs.length === 0) return 0;
   let effective = Math.min(sealed, ackSeq);
   if (!(effective > 0)) return 0;
   const cands = logSeqs.filter((s) => s <= effective).sort((a, b) => a - b);
-  if (cands.length === 0) return effective;
+  if (cands.length === 0) return 0;
   const rows = store.query<{ seq: number }>(`SELECT seq FROM _events WHERE seq <= ?`, [effective]);
   const have = new Set(rows.map((r) => r.seq));
   for (const s of cands) {
@@ -94,11 +148,16 @@ export function clampSealToStored(
 
 /**
  * Sweep log lines with seq <= sealedSeq. New file = marker + kept lines,
- * fsynced, then atomically renamed over the original. Only successfully
- * parsed events at/below the seal are removed; markers supersede, and
- * anything unparseable is preserved byte-for-byte (never drop blind).
+ * fsynced, then atomically renamed over the original. The rename itself is
+ * made durable with a directory fsync (`syncDir`, injectable for tests).
+ * Only successfully parsed events at/below the seal are removed; markers
+ * supersede, and anything unparseable is preserved byte-for-byte.
  */
-export function sweepLogFile(logPath: string, sealedSeq: number): TruncateResult {
+export function sweepLogFile(
+  logPath: string,
+  sealedSeq: number,
+  syncDir: (dir: string) => void = syncDirOf,
+): TruncateResult {
   if (sealedSeq <= 0 || !existsSync(logPath)) return { removed: 0, kept: 0, sealedSeq: 0 };
   const kept: string[] = [];
   let removed = 0;
@@ -152,5 +211,25 @@ export function sweepLogFile(logPath: string, sealedSeq: number): TruncateResult
     closeSync(fd);
   }
   renameSync(tmp, logPath);
+  syncDir(dirname(logPath)); // make the rename itself durable before reporting success
   return { removed, kept: kept.length, sealedSeq };
+}
+
+/**
+ * Best-effort directory fsync so a sweep rename survives a crash (the file
+ * fsync above only durables content, not the directory entry). Platforms
+ * without directory fsync fall through silently — content durability still
+ * holds via the file fsync.
+ */
+function syncDirOf(dir: string): void {
+  try {
+    const dfd = openSync(dir, 'r');
+    try {
+      fsyncSync(dfd);
+    } finally {
+      closeSync(dfd);
+    }
+  } catch {
+    /* no durable-rename primitive here */
+  }
 }

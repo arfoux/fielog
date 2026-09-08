@@ -17,7 +17,7 @@ import {
   type SyncOpts,
 } from './sync.js';
 import { clampSealToStored, takeSnapshot, sweepLogFile } from './retain.js';
-import { mintCapToken, signEvent, type CapToken } from './auth.js';
+import { CAP_TOKEN_TTL_MS, mintCapToken, signEvent, type CapToken } from './auth.js';
 
 export interface KernelOpts {
   file: string; // e.g. 'kasir.db' (+ sidecar 'kasir.log')
@@ -105,8 +105,25 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
   const dbPath = opts.file;
   const logPath = logPathFor(opts.file);
   const store: EventStore = openStore(dbPath);
-  const deviceId: string = opts.deviceId ?? store.getMeta('device.id') ?? randomUUID();
-  if (!store.getMeta('device.id')) store.setMeta('device.id', deviceId);
+  const storedDevice: string | null = store.getMeta('device.id');
+  const storedExplicit: string | null = store.getMeta('device.explicit');
+  if (storedDevice && opts.deviceId && storedDevice !== opts.deviceId && storedExplicit === '1') {
+    const msg =
+      `ERR_DEVICE_MISMATCH: explicit deviceId '${opts.deviceId}' != stored '${storedDevice}' for '${dbPath}'; ` +
+      `refusing to split-brain (reopen with the stored id, or use a fresh file for a new device)`;
+    store.close();
+    throw new Error(msg);
+  }
+  const deviceId: string = opts.deviceId ?? storedDevice ?? randomUUID();
+  if (!storedDevice) {
+    store.setMeta('device.id', deviceId);
+    store.setMeta('device.explicit', opts.deviceId ? '1' : '0');
+  } else if (opts.deviceId && storedDevice !== opts.deviceId) {
+    // First explicit open over an auto-generated id: adopt it (the common
+    // init-then-sync flow), and mark it explicit so any later id throws.
+    store.setMeta('device.id', deviceId);
+    store.setMeta('device.explicit', '1');
+  }
   const signer = opts.privateKeyPem ? (ev: LogEvent) => signEvent(opts.privateKeyPem as string, ev) : undefined;
   let log: AppendLog = openLog(logPath, deviceId, signer);
   // Crash recovery: replay the log into the read-model (idempotent by UUID),
@@ -125,7 +142,38 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
   // Failover memory across sync calls: failed relays cool down with backoff,
   // then get re-probed; list order decides fail-back.
   const failover: FailoverState = createFailoverState(0);
-  async function append(args: AppendArgs): Promise<LogEvent> {
+  // Append/truncate mutex: truncate closes and reopens the log fd, so an
+  // append racing it could write into a closed fd or a stale generation.
+  // Serialize both through one promise chain (cooperative: same process).
+  let tail: Promise<void> = Promise.resolve();
+  function serialize<T>(fn: () => Promise<T>): Promise<T> {
+    const next = tail.then(fn);
+    tail = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+  /** Re-drive log lines the read-model never applied (kill between log.append
+   * and store.apply), like the sync/deltasync pull path. Idempotent by UUID.
+   * Gated on a suspect flag: a split can only appear when an append's
+   * store.apply throws (flagged below) or across a restart (covered by the
+   * open-time replay), so the steady path stays O(1) instead of O(log). */
+  let splitSuspect = false;
+  function healSplit(): void {
+    if (!splitSuspect) return;
+    splitSuspect = false;
+    for (const e of log.readAll()) {
+      if (store.hasId(e.id)) continue;
+      try {
+        store.apply(e);
+      } catch {
+        splitSuspect = true; // still failing: leave it for the next append or restart
+      }
+    }
+  }
+  async function appendInner(args: AppendArgs): Promise<LogEvent> {
+    healSplit();
     const input = toAppendInput(args, deviceId, clock);
     checkAppend(input.type, input.payload ?? {}); // fail fast: no poison lines in the log
     const pending = log.maxSeq() - getAckSeq(store);
@@ -136,21 +184,37 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
       );
     }
     const ev = log.append(input);
-    store.apply(ev);
+    // Contract: the log line above is already fsynced, so a store failure
+    // here is a split, not a loss. Fail loud (never swallow) and let the
+    // next append/restart re-drive the durable line via healSplit/replay.
+    try {
+      store.apply(ev);
+    } catch (err) {
+      splitSuspect = true; // the durable line above still needs re-driving
+      const why = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `ERR_APPLY_SPLIT: log seq ${ev.seq} (id ${ev.id}) is durable but the read-model apply failed (${why}); ` +
+          `it will be re-driven on the next append or restart`,
+      );
+    }
     return ev;
   }
-
   const kernel: Kernel = {
     deviceId,
     dbPath,
     logPath,
-    append: (args) => append(args),
+    append: (args) => serialize(() => appendInner(args)),
+
     query: <T = Record<string, unknown>>(sql: string, params?: SqlParams): Promise<T[]> =>
       Promise.resolve(store.query<T>(sql, params)),
-    undo: (eventId, actor) => append({ type: 'undo.compensate', payload: { reverses: eventId }, actor }),
-    settle: (eventId, outcome, actor) => {
+    undo: async (eventId, actor) => {
+      // Blind compensator by design: the target may live on a peer replica
+      // not yet synced here. Convergence is by fold, not by local existence.
+      return serialize(() => appendInner({ type: 'undo.compensate', payload: { reverses: eventId }, actor }));
+    },
+    settle: async (eventId, outcome, actor) => {
       const type = outcome === 'settled' ? 'payment.settled' : outcome === 'failed' ? 'payment.failed' : 'payment.expired';
-      return append({ type, payload: { event_id: eventId }, actor });
+      return serialize(() => appendInner({ type, payload: { event_id: eventId }, actor }));
     },
     sync: (relay, syncOpts) => {
       const relays = Array.isArray(relay) ? relay : [relay];
@@ -163,7 +227,7 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
       if (!Array.isArray(relay)) return runSync(log, store, relay as Relay, deviceId, syncOpts);
       return syncWithFailover(log, store, relays as Relay[], deviceId, syncOpts, failover);
     },
-    capToken: (privateKeyPem, scopes = ['relay:push', 'relay:pull'], ttlMs = 3600 * 1000) =>
+    capToken: (privateKeyPem, scopes = ['relay:push', 'relay:pull'], ttlMs = CAP_TOKEN_TTL_MS) =>
       mintCapToken(privateKeyPem, deviceId, scopes, ttlMs),
     conflicts: () => Promise.resolve(store.query(`SELECT * FROM conflicts WHERE status = 'open'`)),
     ackSeq: () => getAckSeq(store),
@@ -175,7 +239,7 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
     },
     snapshot: (dest) => Promise.resolve(takeSnapshot(store, dbPath, getAckSeq(store), dest)),
     truncate: () =>
-      Promise.resolve().then(() => {
+      serialize(async () => {
         const sealed = Number(store.getMeta('snapshot.sealed_seq') ?? 0);
         if (sealed <= 0) return { removed: 0, kept: log.readAll().length, sealedSeq: 0 };
         // Belt and suspenders on top of ack-implies-stored: a stale seal or a
@@ -188,15 +252,20 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
           getAckSeq(store),
         );
         if (effective <= 0) return { removed: 0, kept: log.readAll().length, sealedSeq: 0 };
+        // The log fd must be closed for the sweep, so a failed sweep must
+        // still reopen it: a closed-but-referenced log breaks every later
+        // append with EBADF. finally keeps the kernel usable either way.
         log.close();
-        const res = sweepLogFile(logPath, effective);
-        log = openLog(logPath, deviceId, signer);
-        store.replay(log.readAll()); // incremental: kept suffix re-applies, db stands
-        store.exciseMissing(
-          log.readAll().map((e) => e.seq),
-          log.sealedBelow,
-        );
-        return res;
+        try {
+          return sweepLogFile(logPath, effective);
+        } finally {
+          log = openLog(logPath, deviceId, signer);
+          store.replay(log.readAll()); // incremental: kept suffix re-applies, db stands
+          store.exciseMissing(
+            log.readAll().map((e) => e.seq),
+            log.sealedBelow,
+          );
+        }
       }),
     close: () => {
       log.close();

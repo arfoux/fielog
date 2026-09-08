@@ -54,6 +54,23 @@ export function backoffMs(attempt: number, baseMs = 200, maxMs = 30_000): number
   return Math.min(maxMs, baseMs * 2 ** attempt) + Math.floor(Math.random() * 100);
 }
 
+/** True when retrying cannot heal: auth rejection (forbidden/capability/
+ * revoked/unknown device) or a bad cursor. Relay errors arrive as
+ * `relay rejected <op>: <message>` (code flattened into the message), so
+ * match the message; a structured `.code` is honored when present. */
+const PERMANENT_SYNC_ERROR =
+  /forbidden|bad[_ ]cursor|capability|revok|unknown device|missing capability|unauthorized|not authorized/i;
+
+export function isPermanentSyncError(err: unknown): boolean {
+  if (err === null || err === undefined) return false;
+  if (typeof err === 'object' && 'code' in err) {
+    const code = String(err.code ?? '');
+    if (/forbidden|bad[_-]?cursor|unauthorized/i.test(code)) return true;
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  return PERMANENT_SYNC_ERROR.test(msg);
+}
+
 export async function withBackoff<T>(fn: () => Promise<T>, opts: SyncOpts = {}): Promise<T> {
   const maxRetries = opts.maxRetries ?? 5;
   const baseMs = opts.baseMs ?? 200;
@@ -63,6 +80,7 @@ export async function withBackoff<T>(fn: () => Promise<T>, opts: SyncOpts = {}):
     try {
       return await fn();
     } catch (err) {
+      if (isPermanentSyncError(err)) throw err; // retry never heals rejection: fail fast
       if (attempt >= maxRetries) throw err;
       await new Promise((r) => setTimeout(r, backoffMs(attempt, baseMs, maxMs)));
       attempt += 1;
@@ -82,7 +100,11 @@ function applyPushAck(
   // additionally imply durable store: a kill between log.append and
   // store.apply leaves the event on disk but out of the read-model, and
   // acking it would let truncate sweep it into permanent loss. Re-drive the
-  // logged event first; if it still is not stored, hold the cursor here.
+  // logged event first; a transient miss still holds the cursor here, but a
+  // deterministically un-storable event dead-letters (evidence quarantined,
+  // cursor advances) so one poison event never pins the batch cursor and
+  // starves every event behind it. The truncate clamp refuses to sweep seqs
+  // missing from the read-model, so the log bytes stay until reconciled.
   const ackedSet = new Set(ack.acked);
   let advanced = cursor;
   let acked = 0;
@@ -91,8 +113,15 @@ function applyPushAck(
     if (!store.hasId(ev.id)) {
       try {
         store.apply(ev);
-      } catch {
-        break;
+      } catch (err) {
+        const reason = `apply failed for ${ev.id}: ${err instanceof Error ? err.message : String(err)}`;
+        try {
+          quarantineOne(store, ev, reason);
+        } catch {
+          break; // evidence itself unwritable: hold, retry next run
+        }
+        advanced = ev.seq;
+        continue;
       }
       if (!store.hasId(ev.id)) break;
     }
@@ -132,7 +161,22 @@ function verifyPullAuth(remote: LogEvent, registry: Map<string, string> | null, 
     const nominal = Number((remote.payload as Record<string, unknown>)?.['nominal']);
     if (Number.isFinite(nominal) && nominal >= highValue.limit) {
       const sigs = (remote.countersignatures ?? []) as Countersignature[];
-      if (!checkThreshold(registry, remote, sigs, highValue.threshold).thresholdMet) return false;
+      let met: boolean;
+      try {
+        met = checkThreshold(registry, remote, sigs, highValue.threshold).thresholdMet;
+      } catch (err) {
+        // Misconfiguration (threshold outside 1..registry.size) can never
+        // verify: fail loud instead of dead-lettering every high-value
+        // payment into silent loss. Malformed per-event countersignature data
+        // is unverified data, not misconfig: dead-letter as before.
+        if (err instanceof RangeError) {
+          throw new RangeError(
+            `sync highValue misconfigured: threshold ${highValue.threshold} unusable with ${registry.size} trusted device(s)`,
+          );
+        }
+        return false;
+      }
+      if (!met) return false;
     }
   }
   return true;
@@ -214,19 +258,34 @@ function quarantineOne(store: EventStore, ev: LogEvent, reason: string): boolean
   ensureQuarantine(store);
   const known = store.query(`SELECT 1 AS n FROM _quarantine WHERE event_id = ? LIMIT 1`, [ev.id]).length > 0;
   const moves = store.query<{ n: number }>(`SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = ?`, [ev.id]);
-  store.query(`INSERT OR IGNORE INTO _quarantine(event_id, reason, ts, event) VALUES(?,?,?,?)`, [
-    ev.id,
-    reason,
-    Date.now(),
-    JSON.stringify(ev),
-  ]);
-  store.query(`DELETE FROM bayar WHERE event_id = ?`, [ev.id]);
-  store.query(`DELETE FROM stock_moves WHERE event_id = ?`, [ev.id]);
-  store.query(`DELETE FROM records WHERE event_id = ?`, [ev.id]);
-  if ((moves[0]?.n ?? 0) > 0) {
-    // Balances derive from moves: rebuild so quarantined stock stops counting.
-    store.exec(`DELETE FROM stock`);
-    store.exec(`INSERT INTO stock(item, qty) SELECT item, SUM(qty) FROM stock_moves WHERE voided = 0 GROUP BY item`);
+  // Atomic like store.apply: evidence row + view purges + stock rebuild commit
+  // together, so a kill mid-quarantine can neither lose evidence nor leave
+  // half-purged views. Same connection via store.exec, never nested inside
+  // another tx (callers only invoke this after apply rolled back).
+  store.exec('BEGIN IMMEDIATE');
+  try {
+    store.query(`INSERT OR IGNORE INTO _quarantine(event_id, reason, ts, event) VALUES(?,?,?,?)`, [
+      ev.id,
+      reason,
+      Date.now(),
+      JSON.stringify(ev),
+    ]);
+    store.query(`DELETE FROM bayar WHERE event_id = ?`, [ev.id]);
+    store.query(`DELETE FROM stock_moves WHERE event_id = ?`, [ev.id]);
+    store.query(`DELETE FROM records WHERE event_id = ?`, [ev.id]);
+    if ((moves[0]?.n ?? 0) > 0) {
+      // Balances derive from moves: rebuild so quarantined stock stops counting.
+      store.exec(`DELETE FROM stock`);
+      store.exec(`INSERT INTO stock(item, qty) SELECT item, SUM(qty) FROM stock_moves WHERE voided = 0 GROUP BY item`);
+    }
+    store.exec('COMMIT');
+  } catch (err) {
+    try {
+      store.exec('ROLLBACK');
+    } catch {
+      /* already rolled back */
+    }
+    throw err;
   }
   return !known;
 }
@@ -286,9 +345,10 @@ function applyPullEvents(
     }
     if (log.hasId(remote.id)) {
       // Logged on an earlier run but never durably stored (kill between
-      // log.append and store.apply, or a held cursor below). Re-drive the
-      // stored copy instead of minting a duplicate log line; a repeated
-      // failure holds the cursor so the next sync retries this batch.
+      // log.append and store.apply). Re-drive the stored copy instead of
+      // minting a duplicate log line; a deterministically un-storable event
+      // dead-letters (evidence quarantined, cursor advances) so one poison
+      // event never pins the pull cursor and starves the batch behind it.
       const pending = log.getById(remote.id);
       if (pending === null) {
         storedAll = false;
@@ -302,8 +362,13 @@ function applyPullEvents(
       }
       try {
         store.apply(pending);
-      } catch {
-        storedAll = false;
+      } catch (err) {
+        const reason = `pull re-drive apply failed for ${pending.id}: ${err instanceof Error ? err.message : String(err)}`;
+        try {
+          if (quarantineOne(store, pending, reason)) quarantined += 1;
+        } catch {
+          storedAll = false; // evidence itself unwritable: hold, retry next run
+        }
         continue;
       }
       applied += 1;
@@ -341,11 +406,16 @@ function applyPullEvents(
     });
     try {
       store.apply(ev);
-    } catch {
-      // Sqlite-level failure with the event already fsynced in the log:
-      // hold the pull cursor so the retry above re-drives it instead of
-      // abandoning it past the cursor (truncate would then lose it).
-      storedAll = false;
+    } catch (err) {
+      // Fsynced in the log but deterministically un-storable: dead-letter
+      // (evidence quarantined, cursor advances) instead of holding the pull
+      // cursor forever. The truncate clamp still guards the log bytes.
+      const reason = `pull apply failed for ${ev.id}: ${err instanceof Error ? err.message : String(err)}`;
+      try {
+        if (quarantineOne(store, ev, reason)) quarantined += 1;
+      } catch {
+        storedAll = false; // evidence itself unwritable: hold, retry next run
+      }
       continue;
     }
     applied += 1;
@@ -468,6 +538,8 @@ async function failoverPushOne(
   let lastErr: unknown = null;
   for (let pass = 0; pass < maxPasses; pass++) {
     let skipped = 0;
+    let tried = 0;
+    let permanent = 0;
     for (const i of failoverOrder(relays.length, state, Date.now())) {
       if (Date.now() < state.notBefore[i]) {
         skipped += 1;
@@ -481,9 +553,14 @@ async function failoverPushOne(
         return { advanced, acked, serverTime: ack.server_time, relay: i };
       } catch (err) {
         lastErr = err;
+        tried += 1;
+        if (isPermanentSyncError(err)) permanent += 1;
         failoverNoteFailure(state, i, opts);
       }
     }
+    // Every relay rejects permanently (auth/cursor): re-probing after backoff
+    // cannot heal it. Fail fast instead of sleeping through every pass.
+    if (tried > 0 && skipped === 0 && permanent === tried) break;
     if (pass + 1 >= maxPasses) break;
     // All failed or still cooling: wait out the shortest backoff, then re-probe.
     const wait = skipped > 0
@@ -531,13 +608,19 @@ export async function syncWithFailover(
       // misses the other part with success status. Re-push this run's acked
       // prefix to the new relay (idempotent by UUID) so the newest relay
       // always ends complete. Loud on failure: the retry re-drives it.
-      const prefix = log.readAfter(runStart).slice(0, chunkStart - runStart);
+      // Seqs are positions, not counts: past a truncate gap `chunkStart -
+      // runStart` overshoots the acked prefix length and re-pushes the current
+      // chunk. Bound by seq instead: every event at/below the pre-chunk cursor.
+      const prefix = log.readAfter(runStart).filter((e) => e.seq <= chunkStart);
       for (let off = 0; off < prefix.length; off += chunkSize) {
         const b = prefix.slice(off, off + chunkSize);
         const pre = off === 0 ? runStart : prefix[off - 1].seq;
         const ack = await withBackoff(() => relays[one.relay].push(b), opts);
         applyPushAck(store, b, ack, pre);
       }
+      // Backfill writes the prefix cursor, which sits behind this run's
+      // frontier: re-assert it so the persisted ack never moves backwards.
+      store.setMeta(ACK_SEQ_KEY, String(one.advanced));
     }
     pushed += batch.length;
     acked += one.acked;
@@ -561,6 +644,8 @@ export async function syncWithFailover(
   let lastErr: unknown = null;
   for (let pass = 0; pass < maxPasses; pass++) {
     let skipped = 0;
+    let tried = 0;
+    let permanent = 0;
     let done = false;
     for (const i of failoverOrder(relays.length, st, Date.now())) {
       if (Date.now() < st.notBefore[i]) {
@@ -581,10 +666,14 @@ export async function syncWithFailover(
         done = true;
       } catch (err) {
         lastErr = err;
+        tried += 1;
+        if (isPermanentSyncError(err)) permanent += 1;
         failoverNoteFailure(st, i, opts);
       }
     }
     if (done) break;
+    // Every relay rejects permanently: fail fast, the throw below reports it.
+    if (tried > 0 && skipped === 0 && permanent === tried) break;
     if (pass + 1 >= maxPasses) break;
     const wait = skipped > 0
       ? Math.max(0, Math.min(...st.notBefore) - Date.now())

@@ -64,6 +64,10 @@ export function verifyChain(events: LogEvent[], gaps: Iterable<number> = []): Ve
  * fsyncs per write; open quarantines corrupt mid-file lines and re-anchors
  * the survivor (see AppendLog.verify/quarantined/repairedTail/sealedBelow).
  */
-export function openHashChain(path: string, deviceId: string): HashChain {
-  return openLog(path, deviceId);
+export function openHashChain(
+  path: string,
+  deviceId: string,
+  signer?: (ev: LogEvent) => string,
+): HashChain {
+  return openLog(path, deviceId, signer);
 }

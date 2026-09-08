@@ -271,15 +271,21 @@ export class RevokeLog {
     return false;
   }
 
-  /** One row per tokenId at its max epoch, sorted by tokenId. */
+  /**
+   * One row per tokenId at its max epoch, sorted by tokenId. Epoch ties
+   * break by min event hash, mirroring snapshot()'s (epoch, hash) order,
+   * so arrival order never decides the winner across replicas.
+   */
   revokedTokens(): Array<{ tokenId: string; deviceId: string; epoch: number }> {
-    const top = new Map<string, { tokenId: string; deviceId: string; epoch: number }>();
+    const top = new Map<string, { tokenId: string; deviceId: string; epoch: number; hash: string }>();
     for (const e of this.order) {
       const cur = top.get(e.tokenId);
-      if (!cur || e.epoch > cur.epoch) {
-        top.set(e.tokenId, { tokenId: e.tokenId, deviceId: e.deviceId, epoch: e.epoch });
+      if (!cur || e.epoch > cur.epoch || (e.epoch === cur.epoch && e.hash < cur.hash)) {
+        top.set(e.tokenId, { tokenId: e.tokenId, deviceId: e.deviceId, epoch: e.epoch, hash: e.hash });
       }
     }
-    return [...top.values()].sort((a, b) => (a.tokenId < b.tokenId ? -1 : 1));
+    return [...top.values()]
+      .map(({ tokenId, deviceId, epoch }) => ({ tokenId, deviceId, epoch }))
+      .sort((a, b) => (a.tokenId < b.tokenId ? -1 : 1));
   }
 }

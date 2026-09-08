@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { createKernel } from '../src/kernel.ts';
 import { openLog } from '../src/log.ts';
 import { openStore, type EventStore } from '../src/store.ts';
-import { MemoryRelay, getAckSeq, pushPending } from '../src/sync.ts';
+import { MemoryRelay, getAckSeq, pushPending, listQuarantine } from '../src/sync.ts';
 import { takeSnapshot, sweepLogFile } from '../src/retain.ts';
 
 const fast = { baseMs: 1, maxMs: 30 };
@@ -63,7 +63,7 @@ describe('ack implies durable store; truncate never drops unacked/unapplied', ()
     assert.equal(rows[0].n, 1, 'acked event missing from store after truncate+reopen: permanent loss');
   });
 
-  it('push ack does not advance past events missing from the store', async () => {
+  it('push dead-letters events missing from the store: cursor advances, evidence quarantined', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-ackstore-'));
     const dbPath = join(dir, 'kasir.db');
     const logPath = join(dir, 'kasir.log');
@@ -85,8 +85,12 @@ describe('ack implies durable store; truncate never drops unacked/unapplied', ()
     const relay = new MemoryRelay();
     const res = await pushPending(log, broken, relay, fast);
     assert.equal(relay.size, 1, 'relay keeps what it was given; only the ack is at issue');
-    assert.equal(res.acked, 0, 'nothing durably stored, nothing acked');
-    assert.equal(getAckSeq(broken), 0, 'ack recorded without durable store');
+    assert.equal(res.acked, 0, 'nothing applied, nothing counted as acked');
+    // Dead-letter contract: the cursor advances past the deterministically
+    // un-storable event so it never pins the batch, but evidence is
+    // quarantined and the log bytes stay until reconciled.
+    assert.equal(getAckSeq(broken), 1, 'dead-letter advances past the poison event');
+    assert.equal(listQuarantine(broken).length, 1, 'poison event evidence quarantined');
   });
 
   it('truncate-then-sync: unacked suffix survives truncate and still syncs', async () => {

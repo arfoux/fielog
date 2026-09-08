@@ -15,6 +15,9 @@ export {
   verifyBytes,
   signEvent,
   verifyEvent,
+  GRANT_TTL_MS,
+  CAP_TOKEN_TTL_MS,
+  canonicalGrant,
   issueGrant,
   verifyGrant,
   RevocationList,
@@ -23,8 +26,11 @@ export {
   mintCapToken,
   verifyCapToken,
   canonicalCapToken,
+  CapRevocationList,
+  authorizeCapToken,
+  authorizeGrant,
 } from './auth.js';
-export type { DeviceKeypair, ScopeGrant, Countersignature, CapToken } from './auth.js';
+export type { DeviceKeypair, ScopeGrant, Countersignature, CapToken, AuthorizeVerdict } from './auth.js';
 export { createKernel, logPathFor, DEFAULT_OUTBOX_CAP } from './kernel.js';
 export type { Kernel, KernelOpts, AppendArgs, LogHealth } from './kernel.js';
 export { WsRelayServer, WsRelayClient, mulberry32 } from './relay.js';

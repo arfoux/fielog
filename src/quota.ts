@@ -18,7 +18,10 @@ import { statSync } from 'node:fs';
 export interface QuotaOpts {
   /** Hard ceiling in bytes; must be a positive integer. */
   limitBytes: number;
-  /** Files whose on-disk size counts as usage. Missing files count 0. */
+  /** Files whose on-disk size counts as usage. Missing files count 0. The
+   *  list is copied at open: mutating the caller's array afterwards, or
+   *  adding new state files, does not change what the guard measures —
+   *  open a new guard when the measured set changes. */
   files?: string[];
 }
 
@@ -35,11 +38,17 @@ export interface QuotaGuard {
   usage(): number;
   /** Bytes currently held via `reserve` and not yet released. */
   held(): number;
-  /** `limit - used - held`. Throws ERR_QUOTA_UNKNOWN when unmeasurable. */
+  /** `max(0, limit - used - held)`: never negative, so over-quota reality
+   *  reads as zero headroom (with `check()` still throwing to deny). Throws
+   *  ERR_QUOTA_UNKNOWN when unmeasurable. */
   remaining(): number;
   /** Hold `bytes`; throws ERR_QUOTA_EXCEEDED / ERR_QUOTA_UNKNOWN / ERR_QUOTA_INVALID. */
   reserve(bytes: number): void;
-  /** Free `bytes` previously held; clamps at zero, never throws for over-release. */
+  /** Free `bytes` previously held; clamps at zero, never throws for
+   *  over-release. An unbalanced release (freeing more than held, or twice)
+   *  is silently absorbed — held just pins at zero — so pair every reserve
+   *  with exactly one release and treat a zero-held release as a caller bug
+   *  the guard will not flag for you. */
   release(bytes: number): void;
   /** Throw ERR_QUOTA_EXCEEDED if measured + held exceeds the ceiling right now. */
   check(): void;
@@ -90,7 +99,7 @@ export function openQuotaGuard(opts: QuotaOpts): QuotaGuard {
     limit,
     usage,
     held: () => held,
-    remaining: () => limit - usage() - held,
+    remaining: () => Math.max(0, limit - usage() - held),
     reserve: (bytes: number): void => {
       checkBytes(bytes, 'reserve bytes');
       const used = usage(); // throws ERR_QUOTA_UNKNOWN: unmeasurable denies
@@ -107,7 +116,7 @@ export function openQuotaGuard(opts: QuotaOpts): QuotaGuard {
     },
     status: (): QuotaStatus => {
       const used = usage();
-      return { limit, used, reserved: held, remaining: limit - used - held };
+      return { limit, used, reserved: held, remaining: Math.max(0, limit - used - held) };
     },
   };
 }

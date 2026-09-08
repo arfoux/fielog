@@ -2,8 +2,19 @@
 // No PKI: devices are raw public keys; an authority key signs scope grants.
 import { generateKeyPairSync, randomUUID, sign, verify } from 'node:crypto';
 import { canonicalOf, hashFor, type LogEvent } from './log.js';
+/**
+ * Device identity.
+ *
+ * `deviceId` is the lowercase hex encoding of the ed25519 public key's
+ * SPKI DER bytes (`publicKey.export({ type: 'spki', format: 'der' })`
+ * rendered as hex). Registry maps, scope grants, capability tokens, and
+ * countersignatures key on this exact string — never the PEM. An explicit
+ * `deviceId` override (e.g. a named authority such as 'hq' in tests)
+ * bypasses the derivation and is NOT SPKI-DER hex; production devices
+ * always use the derived form.
+ */
 export interface DeviceKeypair {
-  deviceId: string; // hex of the ed25519 public key (SPKI DER)
+  deviceId: string; // lowercase hex of the ed25519 public key (SPKI DER)
   publicKeyPem: string;
   privateKeyPem: string;
 }
@@ -119,10 +130,12 @@ export function verifyGrant(
   now = Date.now(),
 ): boolean {
   if (!grant.signature) return false;
-  const { signature, ...core } = grant;
-  if (!verifyBytes(authorityPublicPem, canonicalGrant(core), signature)) return false;
+  if (grant.expiresAt <= grant.issuedAt) return false; // malformed lifetime: fail closed
+  if (now < grant.issuedAt) return false; // not-before: usable only from issuance
   if (now > grant.expiresAt) return false;
   if (revocations?.isRevoked(grant.id)) return false;
+  const { signature, ...core } = grant;
+  if (!verifyBytes(authorityPublicPem, canonicalGrant(core), signature)) return false;
   return grant.scopes.includes(scope);
 }
 
@@ -263,6 +276,9 @@ export function checkThreshold(
   signatures: Countersignature[],
   threshold: number,
 ): { valid: number; thresholdMet: boolean } {
+  if (!Number.isInteger(threshold) || threshold < 1 || threshold > registry.size) {
+    throw new RangeError(`checkThreshold: threshold ${threshold} out of range 1..${registry.size}`);
+  }
   const seen = new Set<string>();
   let valid = 0;
   for (const s of signatures) {
