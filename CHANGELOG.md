@@ -61,3 +61,13 @@ Untagged commits are folded into the next tag that shipped them.
 
 - The ack cursor only advances over events the relay actually acknowledged, closing the ack-without-store hole.
 - `truncate` clamps the seal to the stored and acked prefix, so a sweep can no longer delete unacked or unapplied data (stale seals become safe no-ops).
+
+## v0.11.0 — review highs, failover stripe
+
+- Kernel appends are signed; per-relay pull cursors; CLI signed by default.
+- Failover stripe backfills the acked prefix on relay switch.
+
+## v0.12.0 — release hygiene
+
+- MIT license, pack files list, README install quickstart + docs links.
+- CLI die race fixed: sync stderr write before exit; signed serve documented.

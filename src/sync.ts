@@ -355,6 +355,12 @@ function applyPullEvents(
 }
 
 
+export interface PushResult {
+  pushed: number;
+  acked: number;
+  serverTime: number | null;
+}
+
 /** Push pending events (seq > ack cursor) in chunks; cursor persists per chunk. */
 export async function pushPending(
   log: AppendLog,

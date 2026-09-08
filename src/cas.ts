@@ -135,7 +135,8 @@ export function openCas(dir: string): CasStore {
         mkdirSync(dirname(blob), { recursive: true });
         const fd = openSync(blob, 'wx');
         try {
-          writeSync(fd, data);
+          if (typeof data === 'string') writeSync(fd, data);
+          else writeSync(fd, data);
           fsyncSync(fd);
         } finally {
           closeSync(fd);

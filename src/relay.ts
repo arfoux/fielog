@@ -79,7 +79,7 @@ export class WsRelayServer {
   revokePushesReceived = 0;
   revokeRejected = 0; // forged/dangling revoke events refused over the wire, never stored
   crashAfter: number | null = null;
-
+  private rng: () => number;
   constructor(private opts: WsRelayServerOpts = {}) {
     this.rng = mulberry32(opts.seed ?? 1);
     if (opts.trustedDevices) {
