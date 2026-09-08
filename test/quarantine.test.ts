@@ -144,7 +144,7 @@ describe('revoke quarantine', () => {
         assert.equal(rows.length, 1);
         assert.equal(rows[0].event_id, 'bad-4');
         const again = purgeRevoked(log, store, { revokedDevices: new Set(['devB']) });
-        assert.deepEqual(again, { scanned: 2, quarantined: 0 });
+        assert.deepEqual(again, { scanned: 0, quarantined: 0 });
       } finally {
         log.close();
         store.close();

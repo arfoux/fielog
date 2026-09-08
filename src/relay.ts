@@ -72,6 +72,11 @@ export class WsRelayServer {
   readonly revokes = new RevokeLog();
   private revokedDevices = new Set<string>(); // device-tombstone cache, valid while revokes.size is stable
   private revokedDevicesAt = -1;
+  /** Per-token verdicts keyed on tokenId+epoch, valid while revokes.size is
+   * stable. authorize() runs per message and RevokeLog.isRevoked scans the
+   * log, so a stable log must answer from cache (O(1) hit); any mutation
+   * bumps size and invalidates every entry at once. */
+  private tokenVerdicts = new Map<string, { size: number; verdict: boolean }>();
   serverTime = 1_700_000_000_000;
   pushesReceived = 0;
   pullsReceived = 0;
@@ -206,7 +211,19 @@ export class WsRelayServer {
 
   /** Per-token kill: some event for tokenId carries an equal-or-higher epoch. */
   isTokenRevoked(tokenId: string, tokenEpoch = 0): boolean {
-    return this.revokes.isRevoked(tokenId, tokenEpoch);
+    return this.cachedIsTokenRevoked(tokenId, tokenEpoch);
+  }
+
+  /** Size-keyed verdict cache: hits avoid the per-message log scan, and any
+   * log mutation (size bump) invalidates every entry on next read. */
+  private cachedIsTokenRevoked(tokenId: string, tokenEpoch = 0): boolean {
+    const key = `${tokenId}:${tokenEpoch}`;
+    const size = this.revokes.size;
+    const hit = this.tokenVerdicts.get(key);
+    if (hit && hit.size === size) return hit.verdict;
+    const verdict = this.revokes.isRevoked(tokenId, tokenEpoch);
+    this.tokenVerdicts.set(key, { size, verdict });
+    return verdict;
   }
 
   /** Revoke a device: future push/pull rejected, tombstone broadcast + persisted. */
@@ -478,7 +495,7 @@ export class WsRelayServer {
         return fail(`device revoked: ${token.deviceId}`);
       }
     }
-    if (token.id && this.revokes.isRevoked(token.id)) return fail(`token revoked: ${token.id}`);
+    if (token.id && this.cachedIsTokenRevoked(token.id)) return fail(`token revoked: ${token.id}`);
     const pem = this.devices.get(token.deviceId);
     if (!pem) return fail(`unknown device: ${token.deviceId}`);
     if (!verifyCapToken(pem, token, scope)) return fail(`capability rejected for ${scope}`);
@@ -557,6 +574,10 @@ export class WsRelayClient implements Relay {
   private inflight = new Map<number, Inflight>();
   private manualClose = false;
   private liveBuf: LogEvent[] = [];
+  /** Persistent id index alongside liveBuf: O(1) amortized dedupe per live
+   * hint instead of rebuilding a Set from the array on every message. Kept
+   * in lockstep with liveBuf on insert, cap-eviction, and pull-drain. */
+  private liveIds = new Set<string>();
   private dials = 0;
   private capToken: CapToken | undefined;
   /** Revoke tombstones broadcast by the relay while this client was connected. */
@@ -653,17 +674,18 @@ export class WsRelayClient implements Relay {
       return;
     }
     if (msg.op === 'live') {
-      const known = new Set(this.liveBuf.map((e) => e.id));
       for (const ev of msg.events) {
-        if (!known.has(ev.id)) {
-          known.add(ev.id);
+        if (!this.liveIds.has(ev.id)) {
+          this.liveIds.add(ev.id);
           this.liveBuf.push(ev);
         }
       }
       // Bound the hint buffer: oldest hints drop first, pull stays the source
       // of truth so nothing is lost — the next pull re-covers the gap.
       if (this.liveBuf.length > MAX_LIVE_HINTS) {
-        this.liveBuf.splice(0, this.liveBuf.length - MAX_LIVE_HINTS);
+        const drop = this.liveBuf.length - MAX_LIVE_HINTS;
+        for (let i = 0; i < drop; i++) this.liveIds.delete(this.liveBuf[i].id);
+        this.liveBuf.splice(0, drop);
       }
       return;
     }
@@ -811,8 +833,12 @@ export class WsRelayClient implements Relay {
     // Merge live hints the server history doesn't cover yet; UUID dedupe
     // keeps it exact (kernel also skips known UUIDs on apply).
     const seen = new Set(res.events.map((e) => e.id));
-    const extra = this.liveBuf.filter((e) => !seen.has(e.id));
-    this.liveBuf = this.liveBuf.filter((e) => !seen.has(e.id));
+    const extra: LogEvent[] = [];
+    for (const e of this.liveBuf) {
+      if (seen.has(e.id)) this.liveIds.delete(e.id);
+      else extra.push(e);
+    }
+    this.liveBuf = extra;
     return { events: [...res.events, ...extra], cursor: res.cursor };
   }
 

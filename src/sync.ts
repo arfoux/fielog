@@ -15,6 +15,8 @@ export interface Relay {
   pull(sinceRelaySeq: number): Promise<{ events: LogEvent[]; cursor: number }>;
 }
 
+export type BackoffJitter = boolean | number | (() => number);
+
 export interface SyncOpts {
   chunkSize?: number;
   maxRetries?: number;
@@ -34,7 +36,19 @@ export interface SyncOpts {
    * in the caller's closure). Checked after revokedDevices; either match
    * quarantines. Receives the remote event on pull, the local event on sweep. */
   isRevoked?: (ev: LogEvent) => boolean;
+  /** Version stamp for the revoke state observed through `isRevoked` (e.g.
+   * RevokeLog.size). Lets purgeRevoked tell "same revoke state, only new log
+   * lines to scan" from "revokes landed, rescan everything". Omit it and a
+   * predicate sweep always rescans: the predicate is opaque, and its closure
+   * may close over mutated revoke state no fingerprint can see. */
+  revokeVersion?: string | number;
+  /** Backoff jitter policy. Undefined/false (default) = deterministic jitter
+   * seeded by the attempt number, so low-maxMs timing tests pin exactly.
+   * true = random jitter via Math.random(); a number fixes the jitter millis;
+   * a function supplies a custom [0,1) source. */
+  jitter?: BackoffJitter;
 }
+
 
 const ACK_SEQ_KEY = 'sync.ack_seq'; // local seq fully acked by the relay
 const PULL_CURSOR_KEY = 'sync.pull_cursor'; // relay seq consumed via pull
@@ -48,10 +62,36 @@ export function getServerTime(store: EventStore): number | null {
   const v = store.getMeta(SERVER_TIME_KEY);
   return v === null ? null : Number(v);
 }
+/** Deterministic jitter step in [0,100), seeded by the attempt number so a
+ * retry sleeps the same millis on every run. */
+function deterministicJitterMs(attempt: number): number {
+  return ((attempt + 1) * 37) % 100;
+}
 
-/** Backoff with jitter: baseMs * 2^attempt, capped at maxMs. */
-export function backoffMs(attempt: number, baseMs = 200, maxMs = 30_000): number {
-  return Math.min(maxMs, baseMs * 2 ** attempt) + Math.floor(Math.random() * 100);
+/** Backoff: baseMs * 2^attempt, capped at maxMs, plus jitter. Deterministic
+ * by default (jitter seeded by the attempt); pass a number for fixed jitter
+ * millis or a [0,1) source for random/custom jitter (opt-in randomness). */
+export function backoffMs(
+  attempt: number,
+  baseMs = 200,
+  maxMs = 30_000,
+  jitter?: number | (() => number),
+): number {
+  const capped = Math.min(maxMs, baseMs * 2 ** attempt);
+  const extra =
+    typeof jitter === 'function'
+      ? Math.floor(jitter() * 100)
+      : typeof jitter === 'number'
+        ? jitter
+        : deterministicJitterMs(attempt);
+  return capped + extra;
+}
+
+/** Resolve a SyncOpts jitter policy to a backoffMs jitter arg. */
+function resolveJitter(opt: BackoffJitter | undefined): number | (() => number) | undefined {
+  if (opt === true) return () => Math.random();
+  if (typeof opt === 'function' || typeof opt === 'number') return opt;
+  return undefined; // false/undefined: deterministic
 }
 
 /** True when retrying cannot heal: auth rejection (forbidden/capability/
@@ -82,7 +122,9 @@ export async function withBackoff<T>(fn: () => Promise<T>, opts: SyncOpts = {}):
     } catch (err) {
       if (isPermanentSyncError(err)) throw err; // retry never heals rejection: fail fast
       if (attempt >= maxRetries) throw err;
-      await new Promise((r) => setTimeout(r, backoffMs(attempt, baseMs, maxMs)));
+      const { promise, resolve } = Promise.withResolvers<void>();
+      setTimeout(resolve, backoffMs(attempt, baseMs, maxMs, resolveJitter(opts.jitter)));
+      await promise;
       attempt += 1;
     }
   }
@@ -290,20 +332,56 @@ function quarantineOne(store: EventStore, ev: LogEvent, reason: string): boolean
   return !known;
 }
 
+const PURGE_CURSOR_KEY = 'sync.purge_seq'; // local log seq swept by purgeRevoked
+const PURGE_FP_KEY = 'sync.purge_revoke_fp'; // revoke fingerprint of the last sweep
+
+/** Last local log seq swept by purgeRevoked (0 when never swept). */
+export function getPurgeSeq(store: EventStore): number {
+  return Number(store.getMeta(PURGE_CURSOR_KEY) ?? 0);
+}
+
+/** Fingerprint of the device-set half of the revoke signal, stable across
+ * Set/array shapes so steady-state pulls hit the incremental path. */
+function revokeDevicesFingerprint(opts: SyncOpts): string {
+  const rd = opts.revokedDevices;
+  if (!rd) return '';
+  return [...(rd instanceof Set ? rd : rd)].sort().join(',');
+}
+
+/** Fingerprint of the whole revoke signal, or null when it is opaque: an
+ * isRevoked predicate without revokeVersion may close over mutated revoke
+ * state no string can see, so it always rescans. */
+function purgeFingerprint(opts: SyncOpts): string | null {
+  if (typeof opts.isRevoked === 'function' && opts.revokeVersion === undefined) return null;
+  return `${revokeDevicesFingerprint(opts)}|${opts.revokeVersion ?? ''}`;
+}
+
 /** Retroactive sweep: quarantine every logged event the revoke set/predicate
  * matches and purge it from the domain read views. The log file is untouched.
  * Run after merging a RevokeLog (or receiving a relay tombstone) so pre-revoke
- * data stops serving. Idempotent: re-sweeps quarantine nothing new. */
+ * data stops serving. Idempotent: re-sweeps quarantine nothing new.
+ *
+ * Incremental: a (swept-seq cursor, revoke fingerprint) pair persists in store
+ * meta, so steady-state pulls under unchanged revoke state scan only the new
+ * log suffix instead of re-reading the whole log. Grown revoke state (or an
+ * unversioned predicate) falls back to a full rescan, so newly-tainted prefix
+ * lines still purge. */
 export function purgeRevoked(log: AppendLog, store: EventStore, opts: SyncOpts = {}): PurgeResult {
   ensureQuarantine(store);
+  const fp = purgeFingerprint(opts);
+  const base = fp !== null && store.getMeta(PURGE_FP_KEY) === fp ? Number(store.getMeta(PURGE_CURSOR_KEY) ?? 0) : 0;
   let scanned = 0;
   let quarantined = 0;
-  for (const ev of log.readAll()) {
+  let frontier = base;
+  for (const ev of log.readAfter(base)) {
     scanned += 1;
+    if (ev.seq > frontier) frontier = ev.seq;
     const reason = revokeReason(ev, opts);
     if (!reason) continue;
     if (quarantineOne(store, ev, reason)) quarantined += 1;
   }
+  store.setMeta(PURGE_CURSOR_KEY, String(frontier));
+  if (fp !== null) store.setMeta(PURGE_FP_KEY, fp);
   return { scanned, quarantined };
 }
 
@@ -514,7 +592,7 @@ export interface FailoverResult extends PushResult, PullResult {
 
 function failoverNoteFailure(state: FailoverState, i: number, opts: SyncOpts): void {
   state.fails[i] += 1;
-  state.notBefore[i] = Date.now() + backoffMs(state.fails[i] - 1, opts.baseMs ?? 200, opts.maxMs ?? 30_000);
+  state.notBefore[i] = Date.now() + backoffMs(state.fails[i] - 1, opts.baseMs ?? 200, opts.maxMs ?? 30_000, resolveJitter(opts.jitter));
 }
 
 /** List order first, relays still on backoff last (re-probed once cooled down). */
@@ -565,7 +643,7 @@ async function failoverPushOne(
     // All failed or still cooling: wait out the shortest backoff, then re-probe.
     const wait = skipped > 0
       ? Math.max(0, Math.min(...state.notBefore) - Date.now())
-      : backoffMs(pass, opts.baseMs ?? 200, opts.maxMs ?? 30_000);
+      : backoffMs(pass, opts.baseMs ?? 200, opts.maxMs ?? 30_000, resolveJitter(opts.jitter));
     if (wait > 0) {
       const { promise, resolve } = Promise.withResolvers<void>();
       setTimeout(resolve, wait);
@@ -677,7 +755,7 @@ export async function syncWithFailover(
     if (pass + 1 >= maxPasses) break;
     const wait = skipped > 0
       ? Math.max(0, Math.min(...st.notBefore) - Date.now())
-      : backoffMs(pass, opts.baseMs ?? 200, opts.maxMs ?? 30_000);
+      : backoffMs(pass, opts.baseMs ?? 200, opts.maxMs ?? 30_000, resolveJitter(opts.jitter));
     if (wait > 0) {
       const { promise, resolve } = Promise.withResolvers<void>();
       setTimeout(resolve, wait);
