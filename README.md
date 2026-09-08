@@ -50,7 +50,7 @@ await hp2.sync(new WsRelayClient('ws://127.0.0.1:8091'));
 - log compat guarantee: [docs/compat.md](docs/compat.md)
 - changelog: [CHANGELOG.md](CHANGELOG.md)
 
-## Core API (v0.12)
+## Core API (v0.13)
 
 | fungsi | bentuk | janji |
 |---|---|---|
