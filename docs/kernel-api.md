@@ -43,7 +43,7 @@ interface LogEvent { id, seq, type, actor?, device_id, ts_device, payload,
   prev_hash, hash, origin_seq?, origin_device?, server_time?,
   signature?, countersignatures? }
 interface AppendLog {
-  append(input: AppendInput): LogEvent; readAll(): LogEvent[];
+  path: string; append(input: AppendInput): LogEvent; readAll(): LogEvent[];
   readAfter(seq: number): LogEvent[]; hasId(id: string): boolean;
   getById(id: string): LogEvent | null; maxSeq(): number; lastHash(): string;
   verify(): VerifyResult; repairedTail: boolean; quarantined: number;

@@ -11,19 +11,20 @@ Cara memasang fielog dan syarat runtime-nya.
 
 ## pasang
 
+Paket `fielog` belum terbit di registry npm — `bun add fielog` /
+`npm i fielog` 404 hari ini. Sampai terbit, pakai dari checkout repo:
+runtime tidak butuh install apa pun selain `bun` itu sendiri
+(tanpa `dependencies`). `bun install` di checkout hanya perlu untuk
+devDeps (`tsc` buat `bun run build`).
+
+Yang akan ikut terkirim saat terbit (`files` di `package.json`): `src`, `bin`,
+`README.md`, `LICENSE`, `CHANGELOG.md`, `docs`.
+
+## coba
+
+Dari checkout repo:
+
 ```sh
-bun add fielog
-# atau: npm i fielog
-```
-
-Yang ikut terkirim (`files` di `package.json`): `src`, `bin`, `README.md`,
-`LICENSE`, `CHANGELOG.md`, `docs`.
-
-## coba tanpa pasang
-
-```sh
-bunx fielog demo
-# atau dari checkout repo:
 bun bin/fielog.ts demo
 ```
 

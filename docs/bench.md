@@ -20,8 +20,9 @@ machine — no estimates. Re-run with `bun bench/bench-*.ts [N]`
 - `bench/bench-query.ts [N]` (default 100000): builds N `bayar` events,
   then 200 timed iterations (10 warmup) of two workloads against the
   SQLite read-model: `sum_all` (`SELECT SUM(nominal) ... WHERE voided = 0`)
-  and `point_by_seq` (`SELECT * FROM bayar WHERE seq = ?`, uniform random
-  seq). `maxPending` is raised to N so the outbox cap does not stop the build.
+  and `point_by_seq` (`SELECT * FROM bayar WHERE seq = ?`, deterministic
+  stride `(i * 7919) % N + 1` covering each seq once per full cycle).
+  `maxPending` is raised to N + 1000 so the outbox cap does not stop the build.
 - `bench/bench-sync.ts [N]` (default 10000): device A appends N events,
   pushes to a real `WsRelayServer` over ws (`chunkSize: 500`), then a fresh
   device B pulls all N. Correctness is checked (`SUM(nominal)` equal on both

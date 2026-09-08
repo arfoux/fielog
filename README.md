@@ -60,7 +60,7 @@ online. `append`/`query`/`undo` tidak pernah menyentuh jaringan — hanya
 
 - Benchmark: [bench](docs/bench.md) (terukur 2026-09-05) —
   smoke 2026-09-09: `bun bench/bench-append.ts 200` →
-  **306 append/detik, p50 3.07 ms, p99 7.63 ms**.
+  **314 append/detik, p50 2.94 ms, p99 6.76 ms**.
   Ulang via `bun run bench:append | bench:query | bench:sync`.
 - Kompat log: [compat](docs/compat.md) · changelog: [CHANGELOG](CHANGELOG.md)
 - Batasan + troubleshooting: [limits-troubleshooting](docs/limits-troubleshooting.md)

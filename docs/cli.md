@@ -21,6 +21,9 @@ exit 2. Saat jalan, cetak `fielog relay listening ws://127.0.0.1:<port>
 file=<file>` + `ready port=<port>`; hidup sampai `SIGINT`/`SIGTERM`.
 
 ```sh
+# sekali saja: lahirkan kunci device (PEM standar: PRIV PKCS#8, PUB SPKI)
+openssl genpkey -algorithm ed25519 -out kasir.priv
+openssl pkey -in kasir.priv -pubout -out kasir.pub
 bun bin/fielog.ts serve --port 8091 --file ./relay.log --trust kasir=./kasir.pub
 bun bin/fielog.ts serve --port 8091 --file ./relay.log --unsigned   # dev saja
 ```

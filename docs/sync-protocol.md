@@ -18,7 +18,7 @@ interface PullResult { pulled: number; applied: number; quarantined: number }
 | fungsi | tanda tangan | janji |
 |---|---|---|
 | `pushPending` | `(log, store, relay, opts?): Promise<PushResult>` | dorong `seq > ack cursor` per chunk; cursor persist per chunk; berhenti di ack parsial, lanjut run berikut |
-| `pullRemote` | `(log, store, deviceId, opts?): Promise<PullResult>` | tarik, terapkan idempoten per UUID di bawah seq lokal baru; pemalsu/poison/co-revoke masuk karantina, cursor tetap maju; sapu retroaktif revoke bila ada sinyal |
+| `pullRemote` | `(log, store, relay, deviceId, opts?): Promise<PullResult>` | tarik, terapkan idempoten per UUID di bawah seq lokal baru; pemalsu/poison/co-revoke masuk karantina, cursor tetap maju; sapu retroaktif revoke bila ada sinyal |
 | `syncKernel` | `(log, store, relay, deviceId, opts?): Promise<PushResult & PullResult>` | push lalu pull |
 | `syncWithFailover` | `(log, store, relays, deviceId, opts?, state?): Promise<FailoverResult>` | coba relay sesuai urutan list per chunk, stick ke yang sehat pertama; gagal = cooldown backoff + re-probe; urutan list menentukan fail-back |
 | `withBackoff` | `(fn, opts?): Promise<T>` | retry backoff eksponensial; berhenti untuk error permanen (`isPermanentSyncError`: forbidden / bad cursor / capability / revok / unknown device / unauthorized) |
