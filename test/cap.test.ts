@@ -51,7 +51,7 @@ describe('relay capabilities', () => {
     const c = new WsRelayClient(`ws://127.0.0.1:${port}`, { ...fast, capToken: forged });
     closers.push(() => c.close());
 
-    await k.append({ type: 'entry', value: 1000, actor: 'toko' });
+    await k.append({ type: 'entry', value: 1000, actor: 'device-01' });
     await rejectsRelay(k.sync(c, { ...fast }));
     await rejectsRelay(c.pull(0));
     assert.equal(server.size, 0);
@@ -72,7 +72,7 @@ describe('relay capabilities', () => {
     const c = new WsRelayClient(`ws://127.0.0.1:${port}`, { ...fast, capToken: expired });
     closers.push(() => c.close());
 
-    await k.append({ type: 'entry', value: 500, actor: 'toko' });
+    await k.append({ type: 'entry', value: 500, actor: 'device-01' });
     await rejectsRelay(k.sync(c, { ...fast }));
     await rejectsRelay(c.pull(0));
     assert.equal(server.size, 0);
@@ -102,7 +102,7 @@ describe('relay capabilities', () => {
     closers.push(() => cb.close());
 
     // Both connected: baseline push works, witness pull establishes its socket.
-    await ka.append({ type: 'entry', value: 100, actor: 'toko' });
+    await ka.append({ type: 'entry', value: 100, actor: 'device-01' });
     const up = await ka.sync(ca, { ...fast });
     assert.equal(up.acked, 1);
     await cb.pull(0);
@@ -112,7 +112,7 @@ describe('relay capabilities', () => {
     // Tombstone reaches the connected witness.
     await waitFor(() => cb.revokedNotices.includes(devA.deviceId));
 
-    await ka.append({ type: 'entry', value: 200, actor: 'toko' });
+    await ka.append({ type: 'entry', value: 200, actor: 'device-01' });
     await rejectsRelay(ka.sync(ca, { ...fast }));
     await rejectsRelay(ca.pull(0));
     assert.ok(server.isRevoked(devA.deviceId));
@@ -139,7 +139,7 @@ describe('relay capabilities', () => {
     server.revokeDevice(devA.deviceId);
 
     // Valid device keeps pushing and pulling through the revocation.
-    await kb.append({ type: 'entry', value: 700, actor: 'toko' });
+    await kb.append({ type: 'entry', value: 700, actor: 'device-01' });
     const up = await kb.sync(cb, { ...fast });
     assert.equal(up.acked, 1);
     const down = await kb.sync(cb, { ...fast });
@@ -159,10 +159,10 @@ describe('relay capabilities', () => {
       capToken: ka.capToken(devA.privateKeyPem),
     });
     closers.push(() => ca.close());
-    await ka.append({ type: 'entry', value: 50, actor: 'toko' });
+    await ka.append({ type: 'entry', value: 50, actor: 'device-01' });
     await rejectsRelay(ka.sync(ca, { maxRetries: 3, ...fast }));
 
-    await kb.append({ type: 'entry', value: 51, actor: 'toko' });
+    await kb.append({ type: 'entry', value: 51, actor: 'device-01' });
     const up2 = await kb.sync(cb, { maxRetries: 20, ...fast });
     assert.equal(up2.acked, 1);
     assert.equal(server2.size, 2);

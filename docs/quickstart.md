@@ -21,6 +21,20 @@ No network at all: `append`/`query`/`undo` never touch the network
 `PAID_OFFLINE` / arbitrary `state` is rejected by `checkAppend` — sync/ack
 decides resolution, never the offline writer.
 
+Same kernel, other domains — any event shape is stored and synced:
+
+```js
+import { createKernel } from 'fielog';
+
+const k = await createKernel({ file: 'app.db' });
+await k.append({ type: 'kill', killer: 'player-1', victim: 'boss-3' });
+await k.append({ type: 'version', file: 'notes.txt', rev: 3 });
+await k.append({ type: 'sample', sensor: 'temp-1', celsius: 21.5 });
+const rows = await k.query('SELECT COUNT(*) AS n FROM records');
+console.log(rows[0].n); // 3 — stored like any other event
+k.close();
+```
+
 ## 2 devices: sync later via a local relay (dev, unsigned)
 
 ```js

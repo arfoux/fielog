@@ -89,9 +89,9 @@ names. Behavior is identical apart from names; no shims, no aliases.
 - `src/store.ts` (`checkAppend`, `route`): `tally.add` / `tally.remove`
   validation, `tally` / `tally_moves` SQL, `underflow` conflict.
 - `scripts/corpus-gen.ts:51,56,82-83` — emits `tally.add` / `tally.remove`;
-  manifest keys (`add` / `sell`) and `ITEMS` unchanged.
+  manifest keys (`add` / `remove`) and `ITEMS` unchanged.
 - `scripts/model-oracle.ts:47-50` — `checkOracle` reads `tally` /
-  `tally_moves`; oracle method names (`add` / `sell`) unchanged.
+  `tally_moves`; oracle method names (`add` / `remove`) unchanged.
 - `docs/corpus-generator.md`, `docs/model-oracle.md` — op tables lead with
   `tally.add` / `tally.remove`; run-evidence blocks labeled pre-rename.
 - `model-fuzz-report.md` — annotated with the rename, body verbatim.

@@ -36,7 +36,7 @@ describe('relay restart', () => {
     let expected = 0;
     for (let i = 0; i < 30; i++) {
       expected += 700 + i;
-      await k.append({ type: 'entry', value: 700 + i, actor: 'toko' });
+      await k.append({ type: 'entry', value: 700 + i, actor: 'device-01' });
     }
     const up = await k.sync(client, { chunkSize: 10, ...fast });
     assert.equal(up.acked, 30);
@@ -57,7 +57,7 @@ describe('relay restart', () => {
     // Client works offline through the outage, then resumes on restart.
     for (let i = 0; i < 5; i++) {
       expected += 50 + i;
-      await k.append({ type: 'entry', value: 50 + i, actor: 'toko' });
+      await k.append({ type: 'entry', value: 50 + i, actor: 'device-01' });
     }
     const re = await k.sync(client, { chunkSize: 10, maxRetries: 20, ...fast });
     assert.equal(re.acked, 5);

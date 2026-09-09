@@ -69,9 +69,9 @@ checkAppend(type: string, payload: Record<string, unknown>): void; // fail-fast 
 EntryState = { DRAFT, RECORDED, RESOLVED_ONLINE, FAILED, EXPIRED };
 ```
 
-Read schema (`entries`, `stock`, `stock_moves`, `records`, `conflicts`,
+Read schema (`entries`, `tally`, `tally_moves`, `records`, `conflicts`,
 `_events`, `_meta`, `_quarantine`): `src/store.ts:SCHEMA`.
-Honest money: offline = RECORDED; `RESOLVED_ONLINE` only via resolve/sync ack.
+Honest state: offline = RECORDED; `RESOLVED_ONLINE` only via resolve/sync ack.
 
 Neighboring modules: [sync-protocol](sync-protocol.md),
 [retention](retention.md), [auth](auth.md).

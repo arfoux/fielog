@@ -10,14 +10,14 @@ const ACTORS = ['device-1', 'device-2', 'device-3'];
 
 export function intentFor(i: number): Intent {
   const actor = ACTORS[i % ACTORS.length];
-  if (i === 0) return { type: 'tally.add', payload: { item: 'kopi', qty: 2000 }, actor: 'gudang' };
-  if (i === 1) return { type: 'tally.add', payload: { item: 'beras', qty: 2000 }, actor: 'gudang' };
+  if (i === 0) return { type: 'tally.add', payload: { item: 'WIDGET-01', qty: 2000 }, actor: 'device-01' };
+  if (i === 1) return { type: 'tally.add', payload: { item: 'WIDGET-02', qty: 2000 }, actor: 'device-01' };
   const m = i % 10;
   if (m <= 5) return { type: 'entry', value: 1000 + ((i * 37) % 9000), actor: actor };
   if (m === 6)
-    return { type: 'tally.add', payload: { item: i % 20 === 6 ? 'kopi' : 'beras', qty: 20 }, actor };
+    return { type: 'tally.add', payload: { item: i % 20 === 6 ? 'WIDGET-01' : 'WIDGET-02', qty: 20 }, actor };
   if (m === 7 || m === 8)
-    return { type: 'tally.remove', payload: { item: i % 2 === 0 ? 'kopi' : 'beras', qty: 1 + (i % 4) }, actor };
+    return { type: 'tally.remove', payload: { item: i % 2 === 0 ? 'WIDGET-01' : 'WIDGET-02', qty: 1 + (i % 4) }, actor };
   return { type: 'entry', value: 2000 + ((i * 53) % 5000), actor: actor };
 }
 

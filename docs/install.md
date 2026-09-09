@@ -31,15 +31,14 @@ bun bin/fielog.ts demo
 `demo` runs a two-node offline demo, then signed-mode sync, proving both sides
 converge to the same records (`bin/fielog.ts:cmdDemo`).
 
-## Files created at use
-
-`createKernel({ file: 'ledger.db' })` creates two files (`src/kernel.ts:logPathFor`):
+`createKernel({ file: 'app.db' })` creates two files (`src/kernel.ts:logPathFor`):
 
 | file | contents |
 |---|---|
-| `ledger.db` | SQLite read-model, opens in DBeaver |
-| `ledger.log` | JSONL append-only, `tail -f` friendly, fsync per append |
+| `app.db` | SQLite read-model, opens in DBeaver |
+| `app.log` | JSONL append-only, `tail -f` friendly, fsync per append |
 
+The basename is yours — ledger-domain examples use `ledger.db` / `ledger.log`.
 Both must be backed up / moved together. See [retention](retention.md)
 for snapshot + truncate.
 

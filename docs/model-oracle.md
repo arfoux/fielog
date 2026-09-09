@@ -22,9 +22,9 @@ steps. Port of skill-6 SOLID to fielog: a plain-arithmetic oracle mirroring
 |---|---|
 | `entry` insert + `resolvePendingEntries` (early undo -> void) | `entry()`: `pend` -> `void`, else `pay[actor] += n` |
 | `tally.add` adds qty + records move | `add()`: `pend` -> `void`, else `stk[item] += q`, `mov[id]` |
-| `tally.remove` underflow -> move voided + conflict, without reducing tally | `sell()`: short tally -> `void`, else `stk[item] -= q`, `mov[id] = -q` |
+| `tally.remove` underflow -> move voided + conflict, without reducing tally | `remove()`: short tally -> `void`, else `stk[item] -= q`, `mov[id] = -q` |
 | `undo.compensate` entry -> void; live move -> void + qty refund; unknown -> parks in `records` | `undo()`: live entry -> reduce `pay`, void; live move -> `stk -= signed`, void; unknown -> `pend` |
-| target landing after a parked undo -> `resolvePendingEntries` voids it | `entry/add/sell` checks `pend` first — same effect oracle-side |
+| target landing after a parked undo -> `resolvePendingEntries` voids it | `entry/add/remove` checks `pend` first — same effect oracle-side |
 Deliberately out of scope (like fuzz): `entry.*` / resolve transitions —
 the op mix is only entry/undo/tally + kill-respawn/sync/replay.
 

@@ -15,7 +15,7 @@ const STEPS = 1000;
 const CHECK_EVERY = 100;
 const SEED = 20260906;
 const ACTOR = ['device-a', 'device-b'];
-const ITEMS = ['kopi', 'gula'];
+const ITEMS = ['WIDGET-01', 'WIDGET-02'];
 
 async function runOracle(seed: number): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'fielog-oracle-'));

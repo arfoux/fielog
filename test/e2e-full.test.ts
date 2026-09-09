@@ -133,7 +133,7 @@ describe('fielog full journey', () => {
       const expectEntry = base.entryTotal + tail.entryTotal - undoneValue;
       const expectTally: Record<string, number> = {};
       for (const m of [base, tail]) for (const [item, qty] of Object.entries(m.tally)) expectTally[item] = (expectTally[item] ?? 0) + qty;
-      expectTally['kopi'] = (expectTally['kopi'] ?? 0) + restoredTally;
+      expectTally['WIDGET-01'] = (expectTally['WIDGET-01'] ?? 0) + restoredTally;
 
       // Phase 5: kill the primary mid-stream, finish via the secondary.
       serverA.kill();

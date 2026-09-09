@@ -21,6 +21,19 @@ console.log(rows[0].total); // 5000 — RECORDED, not resolved
 k.close();
 ```
 
+Any event shape is stored and synced — game kills, file versions, telemetry
+samples ride the same log:
+
+```js
+import { createKernel } from 'fielog';
+
+const k = await createKernel({ file: 'app.db' });
+await k.append({ type: 'kill', killer: 'player-1', victim: 'boss-3' });
+await k.append({ type: 'version', file: 'notes.txt', rev: 3 });
+await k.append({ type: 'sample', sensor: 'temp-1', celsius: 21.5 });
+k.close();
+```
+
 Offline writes are always stored as `RECORDED`; sync/ack happens when online.
 `append`/`query`/`undo` never touch the network — only `sync` does. Any event
 shape is stored and synced; the read-model projects `entry` / `tally` / `undo`
@@ -31,16 +44,16 @@ into queryable tables.
 - [install](docs/install.md) — requirements (`bun` >= 1.0), setup, files created
 - [quickstart](docs/quickstart.md) — 1 device offline, 2 devices syncing (dev + signed mode), runnable
 - [cli](docs/cli.md) — `serve` / `sync` / `demo`, every flag verified against `bin/fielog.ts`
-- Real examples: `demo/two-node.ts` (`bun run demo`), `example/ledger.mjs` (`bun example/ledger.mjs`)
+- Real examples (ledger domain): `demo/two-node.ts` (`bun run demo`), `example/ledger.mjs` (`bun example/ledger.mjs`)
 
 ## Gallery
 
 | | |
 |---|---|
-| <img src="docs/gifs/part1-log.png" alt="hash chain" width="480"><br>hash chain — every append seals to the previous entry | <img src="docs/gifs/part2-sync.png" alt="delta sync" width="480"><br>delta sync — only the diff flies, resuming from the last ack |
-| <img src="docs/gifs/part3-relay.png" alt="relay" width="480"><br>relay — offline devices exchange messages via the server | <img src="docs/gifs/part4-retain.png" alt="snapshot+truncate" width="480"><br>snapshot+truncate — trim the log without losing the trail |
-| <img src="docs/gifs/part5-auth.png" alt="capability+revoke" width="480"><br>capability+revoke — signed tokens, ruthless revocation | <img src="docs/gifs/part6-quarantine.png" alt="quarantine" width="480"><br>quarantine — corrupt entries jailed, never silently dropped |
-| <img src="docs/gifs/part7-readmodel.png" alt="read model" width="480"><br>read model — SQLite rebuilt from the log | <img src="docs/gifs/part8-tombstone.png" alt="soft delete" width="480"><br>soft delete — delete = tombstone, history stays intact |
+| <img src="docs/gifs/part1-log.png" alt="Every append seals to the previous entry, forming a hash chain." width="480"><br>hash chain — every append seals to the previous entry | <img src="docs/gifs/part2-sync.png" alt="Delta sync sends only the diff, resuming from the last ack." width="480"><br>delta sync — only the diff flies, resuming from the last ack |
+| <img src="docs/gifs/part3-relay.png" alt="Offline devices exchange messages through the relay server." width="480"><br>relay — offline devices exchange messages via the server | <img src="docs/gifs/part4-retain.png" alt="Snapshot plus truncate trims the log without losing the trail." width="480"><br>snapshot+truncate — trim the log without losing the trail |
+| <img src="docs/gifs/part5-auth.png" alt="Signed capability tokens gate access, and revocation is ruthless." width="480"><br>capability+revoke — signed tokens, ruthless revocation | <img src="docs/gifs/part6-quarantine.png" alt="Corrupt entries are quarantined, never silently dropped." width="480"><br>quarantine — corrupt entries jailed, never silently dropped |
+| <img src="docs/gifs/part7-readmodel.png" alt="The SQLite read model is rebuilt from the append-only log." width="480"><br>read model — SQLite rebuilt from the log | <img src="docs/gifs/part8-tombstone.png" alt="Delete writes a tombstone, so history stays intact." width="480"><br>soft delete — delete = tombstone, history stays intact |
 
 ## Concepts & architecture
 

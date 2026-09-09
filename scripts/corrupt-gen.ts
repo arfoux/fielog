@@ -1,5 +1,5 @@
 // corrupt-gen: deterministic log corruptor for detector tests.
-// port of skill-9 (corruption-generator, status sehat) to fielog: three
+// port of skill-9 (corruption-generator, status HEALTHY) to fielog: three
 // single-fault modes over the jsonl log at <db>.log. mid-file faults map to
 // quarantine+gaps in src/log.ts openLog; tail faults map to repairedtail.
 import { readFileSync, writeFileSync } from 'node:fs';

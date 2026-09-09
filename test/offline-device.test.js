@@ -1,5 +1,5 @@
 // Offline device flow: 80 transactions appended with NO relay/network,
-// totals served from the local read-model, money stuck at RECORDED.
+// totals served from the local read-model, entries stay RECORDED.
 import { describe, it, beforeAll, afterAll } from 'bun:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
@@ -28,14 +28,14 @@ describe('offline device flow', () => {
     assert.equal(rows[0].total, expected);
   });
 
-  it('money stays RECORDED — never paid offline', async () => {
+  it('entries stay RECORDED — never resolved offline', async () => {
     const states = await k.query(`SELECT DISTINCT state FROM entries`);
     assert.deepEqual(states.map((r) => r.state), ['RECORDED']);
   });
 
-  it('rejects PAID_OFFLINE outright', async () => {
+  it('rejects RESOLVED_OFFLINE outright', async () => {
     await assert.rejects(
-      k.append({ type: 'entry', payload: { value: 50000, actor: 'x', state: 'PAID_OFFLINE' } }),
+      k.append({ type: 'entry', payload: { value: 50000, actor: 'x', state: 'RESOLVED_OFFLINE' } }),
       /cannot be recorded offline/,
     );
   });

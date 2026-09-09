@@ -52,7 +52,7 @@ class Oracle {
 const STEPS = 5000;
 const CHECK_EVERY = 100;
 const ACTOR = ['device-a', 'device-b', 'device-c'];
-const ITEMS = ['kopi', 'gula', 'susu'];
+const ITEMS = ['WIDGET-01', 'WIDGET-02', 'WIDGET-03'];
 
 function norm(m: Map<string, number>): Map<string, number> {
   const out = new Map<string, number>();

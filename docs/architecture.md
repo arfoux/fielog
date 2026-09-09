@@ -19,7 +19,7 @@ Slogan: write anywhere, resolve later.
 | module | file | role |
 |---|---|---|
 | log | `log.ts` | JSONL append-only: UUID per event, sha256 hash chain (`GENESIS` anchor), fsync per append, corrupt-line quarantine, torn-tail trim |
-| store | `store.ts` | SQLite read-model (`bun:sqlite`): `entries` / `stock` / `conflicts` / `_events` / `_meta`; fail-fast `checkAppend` validation before the log is touched |
+| store | `store.ts` | SQLite read-model (`bun:sqlite`): `entries` / `tally` / `tally_moves` / `conflicts` / `_events` / `_meta`; fail-fast `checkAppend` validation before the log is touched |
 | kernel | `kernel.ts` | the `createKernel({ file })` facade: `append` / `query` / `undo` / `resolve` / `sync` / `conflicts` / `health` / `snapshot` / `truncate`. No network except `sync` |
 | sync | `sync.ts` | delta push/pull per `seq` with ack cursors, idempotent per UUID, backoff, dead-letter, multi-relay failover, `MemoryRelay` for tests |
 | deltasync | `deltasync.ts` | manifest-first sync between two replicas (`DeltaPeer { manifest, fetch }`), unsigned — for same-operator replicas |

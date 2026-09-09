@@ -19,7 +19,7 @@ describe('stale-relay pull miss', () => {
     const fresh = new MemoryRelay();
     const seed = await createKernel({ file: join(dir, 'seed.db') });
     try {
-      for (let i = 0; i < 5; i++) await seed.append({ type: 'entry', value: 1000 + i, actor: 'toko' });
+      for (let i = 0; i < 5; i++) await seed.append({ type: 'entry', value: 1000 + i, actor: 'device-01' });
       const up = await seed.sync(fresh, { ...fast });
       assert.equal(up.acked, 5);
       assert.equal(fresh.size, 5);
@@ -50,10 +50,10 @@ describe('stale-relay pull miss', () => {
     const fresh = new MemoryRelay();
     const seed = await createKernel({ file: join(dir, 'seed.db') });
     try {
-      await seed.append({ type: 'entry', value: 100, actor: 'toko' });
-      await seed.append({ type: 'entry', value: 200, actor: 'toko' });
+      await seed.append({ type: 'entry', value: 100, actor: 'device-01' });
+      await seed.append({ type: 'entry', value: 200, actor: 'device-01' });
       await seed.sync(stale, { ...fast });
-      await seed.append({ type: 'entry', value: 300, actor: 'toko' });
+      await seed.append({ type: 'entry', value: 300, actor: 'device-01' });
       await seed.sync(fresh, { ...fast });
       assert.equal(stale.size, 2);
       assert.equal(fresh.size, 1); // delta only: seq 1-2 already acked via stale

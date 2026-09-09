@@ -49,7 +49,7 @@ describe('flfix store audit', () => {
     assert.doesNotThrow(() => s.apply(a));
   });
 
-  it('(2) fractional entry value rejected (integer-money invariant)', () => {
+  it('(2) fractional entry value rejected (integer-value invariant)', () => {
     assert.throws(() => checkAppend('entry', { value: 10.5 }), /integer/);
     assert.throws(() => checkAppend('entry', { value: 0.1 }), /integer/);
     assert.doesNotThrow(() => checkAppend('entry', { value: 100 }));
@@ -62,7 +62,7 @@ describe('flfix store audit', () => {
 
   it('(3) duplicate conflict swallowed, disk/locking-class errors rethrown', () => {
     const s = track(openStore(':memory:'));
-    const e1 = ev({ id: 'flfix-cf-1', seq: 1, type: 'tally.remove', payload: { item: 'kopi', qty: 5 } });
+    const e1 = ev({ id: 'flfix-cf-1', seq: 1, type: 'tally.remove', payload: { item: 'WIDGET-01', qty: 5 } });
     s.apply(e1); // underflow with nothing on hand -> conflict row
     s.exec(`DELETE FROM _events WHERE id = 'flfix-cf-1'`);
     s.exec(`DELETE FROM tally_moves WHERE event_id = 'flfix-cf-1'`);
@@ -72,7 +72,7 @@ describe('flfix store audit', () => {
 
     const s2 = track(openStore(':memory:'));
     s2.exec(`DROP TABLE conflicts`); // every addConflict now hits a real storage error
-    const e2 = ev({ id: 'flfix-cf-2', seq: 1, type: 'tally.remove', payload: { item: 'kopi', qty: 5 } });
+    const e2 = ev({ id: 'flfix-cf-2', seq: 1, type: 'tally.remove', payload: { item: 'WIDGET-01', qty: 5 } });
     assert.throws(() => s2.apply(e2), /no such table/i);
     assert.equal(s2.hasId('flfix-cf-2'), false);
   });
@@ -95,7 +95,7 @@ describe('flfix store audit', () => {
   it('(5) exciseMissing is atomic: mid-sweep failure rolls everything back', () => {
     const s = track(openStore(':memory:'));
     const b = ev({ id: 'flfix-ex-b', seq: 1, type: 'entry', payload: { value: 100, actor: 'k' } });
-    const a = ev({ id: 'flfix-ex-a', seq: 2, type: 'tally.add', payload: { item: 'kopi', qty: 10 } });
+    const a = ev({ id: 'flfix-ex-a', seq: 2, type: 'tally.add', payload: { item: 'WIDGET-01', qty: 10 } });
     s.apply(b);
     s.apply(a);
     // Fail the final tally rebuild: every per-row delete has already run, so
@@ -111,7 +111,7 @@ describe('flfix store audit', () => {
       s.query<{ n: number }>(`SELECT COUNT(*) AS n FROM tally_moves WHERE event_id = 'flfix-ex-a'`)[0].n,
       1,
     );
-    assert.equal(s.query<{ q: number }>(`SELECT qty AS q FROM tally WHERE item = 'kopi'`)[0].q, 10);
+    assert.equal(s.query<{ q: number }>(`SELECT qty AS q FROM tally WHERE item = 'WIDGET-01'`)[0].q, 10);
     // A clean re-run still converges.
     assert.equal(s.exciseMissing([], 0), 2);
     assert.equal(s.hasId('flfix-ex-b'), false);

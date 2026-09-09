@@ -32,10 +32,10 @@ describe('undo compensating event', () => {
   });
 
   it('restores tally on remove undo', async () => {
-    await k.append({ type: 'tally.add', payload: { item: 'kopi', qty: 10 } });
-    const remove = await k.append({ type: 'tally.remove', payload: { item: 'kopi', qty: 4 } });
+    await k.append({ type: 'tally.add', payload: { item: 'WIDGET-01', qty: 10 } });
+    const remove = await k.append({ type: 'tally.remove', payload: { item: 'WIDGET-01', qty: 4 } });
     await k.undo(remove.id);
-    const rows = await k.query(`SELECT qty FROM tally WHERE item = 'kopi'`);
+    const rows = await k.query(`SELECT qty FROM tally WHERE item = 'WIDGET-01'`);
     assert.equal(rows[0].qty, 10);
   });
 });

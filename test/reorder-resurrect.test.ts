@@ -102,11 +102,11 @@ describe('out-of-order resurrection', () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-reorder-'));
     const add = mkEv({
       id: 'add-1', seq: 1, type: 'tally.add', ts: 1,
-      payload: { item: 'kopi', qty: 10 }, prev: 'GENESIS',
+      payload: { item: 'WIDGET-01', qty: 10 }, prev: 'GENESIS',
     });
     const remove = mkEv({
       id: 'remove-1', seq: 3, type: 'tally.remove', ts: 3,
-      payload: { item: 'kopi', qty: 4 }, prev: 'h2',
+      payload: { item: 'WIDGET-01', qty: 4 }, prev: 'h2',
     });
     const undo = mkEv({
       id: 'undo-remove-1', seq: 2, type: 'undo.compensate', ts: 2,
@@ -117,7 +117,7 @@ describe('out-of-order resurrection', () => {
     const k = await createKernel({ file: join(dir, 'ledger.db') });
     try {
       await k.sync(relay, { chunkSize: 10, ...fast });
-      const tally = await k.query<{ qty: number }>(`SELECT qty FROM tally WHERE item = 'kopi'`);
+      const tally = await k.query<{ qty: number }>(`SELECT qty FROM tally WHERE item = 'WIDGET-01'`);
       assert.equal(tally[0].qty, 10);
       const moves = await k.query<{ voided: number }>(`SELECT voided FROM tally_moves WHERE event_id = 'remove-1'`);
       assert.equal(moves[0].voided, 1);
