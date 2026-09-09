@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# two-device-rig.sh -- rig kasir-01/kasir-02: tiga skenario konvergensi
-# dua device lewat satu relay (port of skill-11 multi-device-rig).
+# two-device-rig.sh -- kasir-01/kasir-02 rig: three convergence scenarios
+# over one relay (port of skill-11 multi-device-rig).
 #
-# Skenario (test/two-device-rig.test.ts):
-#   s1  kasir-01 jualan offline, kasir-02 tarik sampai sama + re-sync no-op
-#   s2  dua arah tabrakan offline lalu konvergen ke jumlah gabungan
-#   s3  relay putus tengah batch, resume tanpa duplikat (exact-once by uuid)
+# Scenarios (test/two-device-rig.test.ts):
+#   s1  kasir-01 sells offline, kasir-02 pulls to match + re-sync no-op
+#   s2  two-way offline divergence then converge to the combined total
+#   s3  relay drops mid-batch, resume without duplicates (exact-once by uuid)
 #
 # Usage:
 #   bash scripts/two-device-rig.sh [--n N] [--filter PATTERN]

@@ -3,8 +3,8 @@
 #
 # A bench number is accepted only with three pins attached:
 #   1. slice  - exact code version (git HEAD hash).
-#   2. korpus - exact workload (bench name + N + fixed workload params).
-#   3. mesin  - exact machine + runtime (os, arch, bun version).
+#   2. corpus - exact workload (bench name + N + fixed workload params).
+#   3. machine - exact machine + runtime (os, arch, bun version).
 # Any pin mismatch => HONESTY: FAIL, exit 2 (mismatch-stop: STOP, do not
 # quote the number). The script reports raw pins; the coordinator judges.
 #
@@ -73,11 +73,11 @@ BUN_VER="$(bun --version 2>/dev/null)" || BUN_VER="?"
 OS="$(uname -s 2>/dev/null || echo unknown)"
 ARCH="$(uname -m 2>/dev/null || echo unknown)"
 
-# korpus pin: fixed workload params per bench (must match bench/*.ts source).
+# corpus pin: fixed workload params per bench (must match bench/*.ts source).
 case "$BENCH" in
-  append) KORPUS="n=$N nominal=1000+(i%9000) oleh=bench" ;;
-  query) KORPUS="n=$N iters=200 warmup=10 maxPending=n+1000 workloads=sum_all,point_by_seq" ;;
-  sync) KORPUS="n=$N chunk=500 relay=ws-real fast=1/30ms" ;;
+  append) CORPUS="n=$N nominal=1000+(i%9000) oleh=bench" ;;
+  query) CORPUS="n=$N iters=200 warmup=10 maxPending=n+1000 workloads=sum_all,point_by_seq" ;;
+  sync) CORPUS="n=$N chunk=500 relay=ws-real fast=1/30ms" ;;
 esac
 
 fail() { echo "HONESTY: FAIL bench=$BENCH $1" >&2; exit 2; }
@@ -90,13 +90,13 @@ if [ -n "$EXPECT_HEAD" ]; then
   esac
 fi
 if [ -n "$EXPECT_BUN" ]; then
-  [ "$BUN_VER" = "$EXPECT_BUN" ] || fail "mesin mismatch bun=$BUN_VER expect=$EXPECT_BUN"
+  [ "$BUN_VER" = "$EXPECT_BUN" ] || fail "machine mismatch bun=$BUN_VER expect=$EXPECT_BUN"
 fi
 
 pins() {
   echo "[bench-check] slice head=$HEAD bench_file=$BENCH_FILE"
-  echo "[bench-check] korpus $KORPUS"
-  echo "[bench-check] mesin os=$OS arch=$ARCH bun=$BUN_VER"
+  echo "[bench-check] corpus $CORPUS"
+  echo "[bench-check] machine os=$OS arch=$ARCH bun=$BUN_VER"
 }
 
 # check_output <file>: a captured bench log must carry its RESULT line and
@@ -113,14 +113,14 @@ check_output() {
 
 if [ "$RECORD" = "1" ]; then
   pins
-  echo "HONESTY: PASS bench=$BENCH pins_recorded head=$HEAD bun=$BUN_VER korpus=\"$KORPUS\""
+  echo "HONESTY: PASS bench=$BENCH pins_recorded head=$HEAD bun=$BUN_VER corpus=\"$CORPUS\""
   exit 0
 fi
 
 if [ -n "$FROM_OUTPUT" ]; then
   pins
   check_output "$FROM_OUTPUT"
-  echo "HONESTY: PASS bench=$BENCH head=$HEAD bun=$BUN_VER korpus=\"$KORPUS\" source=$FROM_OUTPUT"
+  echo "HONESTY: PASS bench=$BENCH head=$HEAD bun=$BUN_VER corpus=\"$CORPUS\" source=$FROM_OUTPUT"
   exit 0
 fi
 
@@ -134,9 +134,9 @@ if [ "$RUN" = "1" ]; then
   cat "$LOG"
   [ "$STATUS" -eq 0 ] || fail "bench exit=$STATUS (log kept: $LOG)"
   check_output "$LOG"
-  echo "HONESTY: PASS bench=$BENCH head=$HEAD bun=$BUN_VER korpus=\"$KORPUS\" log=$LOG"
+  echo "HONESTY: PASS bench=$BENCH head=$HEAD bun=$BUN_VER corpus=\"$CORPUS\" log=$LOG"
   exit 0
 fi
 
 pins
-echo "HONESTY: PASS bench=$BENCH pins_ok head=$HEAD bun=$BUN_VER korpus=\"$KORPUS\""
+echo "HONESTY: PASS bench=$BENCH pins_ok head=$HEAD bun=$BUN_VER corpus=\"$CORPUS\""

@@ -3,7 +3,7 @@
 #
 # Runs test/soak-runner.test.ts (random append/seal/sync/restart with an
 # invariant check every N steps) under a chosen seed and prints the proof
-# line: ops + invariant checks + seed. The killer case (tabrakan seal:
+# line: ops + invariant checks + seed. The killer case (seal collision:
 # colliding snapshots sweep only the sealed prefix) always runs.
 #
 # Usage:
@@ -31,7 +31,7 @@ while [ $# -gt 0 ]; do
     --seed) [ $# -ge 2 ] || { echo "error: --seed needs a value" >&2; usage; exit 2; }; SEED="$2"; shift 2 ;;
     --steps) [ $# -ge 2 ] || { echo "error: --steps needs a value" >&2; usage; exit 2; }; STEPS="$2"; shift 2 ;;
     --check-every) [ $# -ge 2 ] || { echo "error: --check-every needs a value" >&2; usage; exit 2; }; CHECK_EVERY="$2"; shift 2 ;;
-    --killer-only) FILTER="tabrakan seal"; shift ;;
+    --killer-only) FILTER="seal collision"; shift ;;
     --filter) [ $# -ge 2 ] || { echo "error: --filter needs a value" >&2; usage; exit 2; }; FILTER="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "error: unknown flag '$1'" >&2; usage; exit 2 ;;
