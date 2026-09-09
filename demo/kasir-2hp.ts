@@ -9,12 +9,12 @@ import { createKernel, WsRelayServer, WsRelayClient } from '../src/index.ts';
 const dir = mkdtempSync(join(tmpdir(), 'kasir-2hp-'));
 const server = new WsRelayServer({ port: 8091, file: join(dir, 'relay.log') });
 await server.start();
-console.log(`relay di ${dir} port 8091`);
+console.log(`relay at ${dir} port 8091`);
 
 const hp1 = await createKernel({ file: join(dir, 'hp1.db') });
 const hp2 = await createKernel({ file: join(dir, 'hp2.db') });
 
-// 20 transaksi offline di hp1: tanpa jaringan sama sekali.
+// 20 offline transactions on hp1: no network at all.
 let expected = 0;
 for (let i = 0; i < 20; i++) {
   const nominal = 5000 + i * 250;
@@ -25,7 +25,7 @@ const t1off = await hp1.query<{ total: number }>(`SELECT SUM(nominal) AS total F
 const t2off = await hp2.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
 console.log('offline: hp1 =', t1off[0].total, '| hp2 =', t2off[0].total ?? 0);
 
-// Sync dua sisi lewat relay ws lokal.
+// Two-sided sync through the local ws relay.
 const c1 = new WsRelayClient('ws://127.0.0.1:8091');
 const c2 = new WsRelayClient('ws://127.0.0.1:8091');
 await hp1.sync(c1);
@@ -34,9 +34,9 @@ const t1 = await hp1.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM
 const t2 = await hp2.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
 console.log('sync:    hp1 =', t1[0].total, '| hp2 =', t2[0].total);
 if (t1[0].total !== expected || t2[0].total !== expected) {
-  throw new Error(`total beda: hp1=${t1[0].total} hp2=${t2[0].total} mau=${expected}`);
+  throw new Error(`totals differ: hp1=${t1[0].total} hp2=${t2[0].total} expected=${expected}`);
 }
-console.log('sama dua sisi. hp1 state:', (await hp1.query(`SELECT DISTINCT state FROM bayar`)).map((r) => r.state));
+console.log('match on both sides. hp1 state:', (await hp1.query(`SELECT DISTINCT state FROM bayar`)).map((r) => r.state));
 
 c1.close();
 c2.close();

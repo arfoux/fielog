@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
-// bin/fielog.ts — cli kecil: serve relay ws, sync file kernel, demo kasir 2hp.
-// bun only. mode tanda default: serve butuh --trust id=pub.pem (boleh ulang)
-// dan sync butuh --key priv.pem --as <device>; --unsigned memilih relay
-// terbuka warisan (menerima device_id apa pun, hanya untuk dev lokal).
-// contoh:
+// bin/fielog.ts — small CLI: serve the ws relay, sync a kernel file, run the 2-phone kasir demo.
+// Bun only. Signed mode by default: serve needs --trust id=pub.pem (repeatable)
+// and sync needs --key priv.pem --as <device>; --unsigned selects the legacy
+// open relay (accepts any device_id, local dev only).
+// examples:
 //   bun bin/fielog.ts serve --port 8091 --file ./relay.log --trust kasir=./kasir.pub
 //   bun bin/fielog.ts sync --file ./kasir.db --relay ws://127.0.0.1:8091 --key ./kasir.priv --as kasir
 //   bun bin/fielog.ts serve --port 8091 --file ./relay.log --unsigned
@@ -15,14 +15,14 @@ import { createKernel, generateDeviceKey, WsRelayClient, WsRelayServer } from '.
 
 function usage(): string {
   return [
-    'pakai: fielog <serve|sync|demo> [opsi]',
+    'usage: fielog <serve|sync|demo> [options]',
     '  serve --port <n> --file <relay.log> --trust <id=pub.pem> [--trust ...]',
-    '    jalan relay ws file-backed mode tanda (tolak device tak dikenal)',
-    '  serve --port <n> --file <relay.log> --unsigned   relay terbuka (dev saja)',
+    '    run the file-backed ws relay in signed mode (rejects unknown devices)',
+    '  serve --port <n> --file <relay.log> --unsigned   open relay (dev only)',
     '  sync --file <kasir.db> --relay <ws url> --key <priv.pem> --as <device>',
-    '    dorong+tari delta kernel dengan token kapabilitas',
-    '  sync --file <kasir.db> --relay <ws url> --unsigned   tanpa tanda (dev saja)',
-    '  demo   kasir 2hp offline lalu sync mode tanda, total sama',
+    '    push+pull the kernel delta with a capability token',
+    '  sync --file <kasir.db> --relay <ws url> --unsigned   unsigned (dev only)',
+    '  demo   2-phone kasir: offline sales, then signed-mode sync with matching totals',
   ].join('\n');
 }
 
@@ -39,8 +39,8 @@ function argAll(args: string[], name: string): string[] {
 }
 
 function die(msg: string): never {
-  // tulis sinkron: console.error + process.exit balap saat stderr pipe
-  // (test cli-auth baca stderr anak proses, tulis async bisa hilang).
+  // write synchronously: console.error + process.exit race when stderr is piped
+  // (the cli-auth test reads the child process stderr; async writes can be lost).
   writeSync(2, msg + '\n' + usage() + '\n');
   process.exit(2);
 }
@@ -52,17 +52,17 @@ async function cmdServe(rest: string[]): Promise<void> {
   const trustedDevices: Record<string, string> = {};
   for (const t of argAll(rest, '--trust')) {
     const eq = t.indexOf('=');
-    if (eq < 0) die(`--trust mau id=jalur-pubkey, dapat: ${t}`);
+    if (eq < 0) die(`--trust wants id=pubkey-path, got: ${t}`);
     const id = t.slice(0, eq);
-    if (!id) die(`--trust mau id=jalur-pubkey, dapat: ${t}`);
+    if (!id) die(`--trust wants id=pubkey-path, got: ${t}`);
     try {
       trustedDevices[id] = readFileSync(t.slice(eq + 1), 'utf8').trim();
     } catch {
-      die(`pubkey tak terbaca untuk --trust ${id}: ${t.slice(eq + 1)}`);
+      die(`cannot read pubkey for --trust ${id}: ${t.slice(eq + 1)}`);
     }
   }
   if (Object.keys(trustedDevices).length === 0 && !unsigned) {
-    die('serve butuh --trust <id=pub.pem> atau --unsigned untuk relay terbuka');
+    die('serve needs --trust <id=pub.pem> or --unsigned for an open relay');
   }
   const server = new WsRelayServer({ port, file, trustedDevices, allowUnsigned: unsigned });
   const actual = await server.start();
@@ -74,7 +74,7 @@ async function cmdServe(rest: string[]): Promise<void> {
   };
   process.on('SIGINT', stop);
   process.on('SIGTERM', stop);
-  await new Promise(() => {}); // hidup sampai dibunuh
+  await new Promise(() => {}); // run until killed
 }
 
 async function cmdSync(rest: string[]): Promise<void> {
@@ -84,8 +84,8 @@ async function cmdSync(rest: string[]): Promise<void> {
   const unsigned = rest.includes('--unsigned');
   const keyPath = arg(rest, '--key');
   const asId = arg(rest, '--as');
-  if (!keyPath && !unsigned) die('sync butuh --key <priv.pem> --as <device> atau --unsigned untuk tanpa tanda');
-  if (keyPath && !asId) die('sync --key butuh pasangan --as <device>');
+  if (!keyPath && !unsigned) die('sync needs --key <priv.pem> --as <device> or --unsigned for unsigned mode');
+  if (keyPath && !asId) die('sync --key needs a matching --as <device>');
   const privateKeyPem = keyPath ? readFileSync(keyPath, 'utf8').trim() : undefined;
   const kernel = await createKernel({ file: file as string, deviceId: asId, privateKeyPem });
   const token = privateKeyPem ? kernel.capToken(privateKeyPem) : undefined;
@@ -120,12 +120,12 @@ async function cmdDemo(): Promise<void> {
     await hp2.sync(c2, { trustedDevices: { hp1: k1.publicKeyPem } });
     const t1 = await hp1.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
     const t2 = await hp2.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
-    console.log(`sync: hp1 = ${t1[0].total} | hp2 = ${t2[0].total} | mau = ${expected}`);
+    console.log(`sync: hp1 = ${t1[0].total} | hp2 = ${t2[0].total} | expected = ${expected}`);
     if (t1[0].total !== expected || t2[0].total !== expected) {
-      console.error(`total beda: hp1=${t1[0].total} hp2=${t2[0].total} mau=${expected}`);
+      console.error(`totals differ: hp1=${t1[0].total} hp2=${t2[0].total} expected=${expected}`);
       process.exit(1);
     }
-    console.log('sama dua sisi, total cocok');
+    console.log('match on both sides, totals agree');
   } finally {
     c1.close();
     c2.close();
