@@ -23,15 +23,15 @@ const STRIP = ['server_time', 'origin_seq', 'origin_device', 'signature', 'count
 interface Fixture {
   file: string;
   events: number;
-  bayarN: number;
-  bayarTotal: number;
+  paymentN: number;
+  paymentTotal: number;
   stockItem: string;
   stockQty: number;
 }
 
 const FIXTURES: Fixture[] = [
-  { file: 'kasir-minimal.log', events: 5, bayarN: 2, bayarTotal: 40000, stockItem: 'kopi', stockQty: 97 },
-  { file: 'kasir-actor.log', events: 4, bayarN: 2, bayarTotal: 15000, stockItem: 'gula', stockQty: 47 },
+  { file: 'ledger-minimal.log', events: 5, paymentN: 2, paymentTotal: 40000, stockItem: 'kopi', stockQty: 97 },
+  { file: 'ledger-actor.log', events: 4, paymentN: 2, paymentTotal: 15000, stockItem: 'gula', stockQty: 47 },
 ];
 
 const rawLines = (f: Fixture): string[] =>
@@ -41,8 +41,8 @@ describe('compat vectors (healthy set)', () => {
   beforeAll(async () => {
     for (const f of FIXTURES) {
       const dir = mkdtempSync(join(tmpdir(), 'fielog-healthy-'));
-      copyFileSync(join(here, 'fixtures', 'v0.5', f.file), join(dir, 'kasir.log'));
-      kernels.set(f.file, await createKernel({ file: join(dir, 'kasir.db') }));
+      copyFileSync(join(here, 'fixtures', 'v0.5', f.file), join(dir, 'ledger.log'));
+      kernels.set(f.file, await createKernel({ file: join(dir, 'ledger.db') }));
     }
   });
   afterAll(() => {
@@ -93,11 +93,11 @@ describe('compat vectors (healthy set)', () => {
     for (const f of FIXTURES) {
       const k = kernels.get(f.file)!;
       assert.equal(k.health().events, f.events);
-      const bayar = await k.query<{ n: number; total: number }>(
-        `SELECT COUNT(*) AS n, SUM(nominal) AS total FROM bayar WHERE voided = 0`,
+      const payment = await k.query<{ n: number; total: number }>(
+        `SELECT COUNT(*) AS n, SUM(amount) AS total FROM payment WHERE voided = 0`,
       );
-      assert.equal(bayar[0].n, f.bayarN);
-      assert.equal(bayar[0].total, f.bayarTotal);
+      assert.equal(payment[0].n, f.paymentN);
+      assert.equal(payment[0].total, f.paymentTotal);
       const stock = await k.query<{ qty: number }>(`SELECT qty FROM stock WHERE item = ?`, [f.stockItem]);
       assert.equal(stock[0].qty, f.stockQty);
     }
@@ -107,7 +107,7 @@ describe('compat vectors (healthy set)', () => {
     for (const f of FIXTURES) {
       const k = kernels.get(f.file)!;
       const tip = JSON.parse(rawLines(f).at(-1)!).hash;
-      const ev = await k.append({ type: 'bayar', nominal: 1000, oleh: 'healthy' });
+      const ev = await k.append({ type: 'payment', amount: 1000, actor: 'healthy' });
       assert.equal(ev.seq, f.events + 1);
       assert.equal(ev.prev_hash, tip);
       assert.deepEqual(k.verifyLog(), { ok: true });

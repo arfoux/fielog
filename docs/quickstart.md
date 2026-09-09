@@ -8,9 +8,9 @@ Every snippet below runs as-is.
 ```js
 import { createKernel } from 'fielog';
 
-const k = await createKernel({ file: 'kasir.db' });
-await k.append({ type: 'bayar', nominal: 5000, oleh: 'kasir-1' });
-const rows = await k.query('SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0');
+const k = await createKernel({ file: 'ledger.db' });
+await k.append({ type: 'payment', amount: 5000, actor: 'device-01' });
+const rows = await k.query('SELECT SUM(amount) AS total FROM payment WHERE voided = 0');
 console.log(rows[0].total); // 5000 — IOU_RECORDED state, not settled
 k.close();
 ```
@@ -26,23 +26,23 @@ import { createKernel, WsRelayServer, WsRelayClient } from 'fielog';
 
 const server = new WsRelayServer({ port: 8091, file: 'relay.log' });
 await server.start();
-const hp1 = await createKernel({ file: 'hp1.db' });
-const hp2 = await createKernel({ file: 'hp2.db' });
-await hp1.append({ type: 'bayar', nominal: 5000, oleh: 'kasir-1' });
+const node1 = await createKernel({ file: 'device-01.db' });
+const node2 = await createKernel({ file: 'device-02.db' });
+await node1.append({ type: 'payment', amount: 5000, actor: 'device-01' });
 const c1 = new WsRelayClient('ws://127.0.0.1:8091');
 const c2 = new WsRelayClient('ws://127.0.0.1:8091');
-await hp1.sync(c1);
-await hp2.sync(c2);
-const t = await hp2.query('SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0');
+await node1.sync(c1);
+await node2.sync(c2);
+const t = await node2.query('SELECT SUM(amount) AS total FROM payment WHERE voided = 0');
 console.log(t[0].total); // 5000 — moved via relay
 c1.close();
 c2.close();
-hp1.close();
-hp2.close();
+node1.close();
+node2.close();
 server.kill();
 ```
 
-The full 20-transaction example is in `demo/kasir-2hp.ts`
+The full 20-transaction example is in `demo/two-node.ts`
 (run via `bun run demo`).
 
 ## 2 phones: signed mode (production)
@@ -52,12 +52,12 @@ pubkey, sync carries a capability token (`bin/fielog.ts`):
 
 ```sh
 # one time only: mint the device key (standard PEM: PRIV PKCS#8, PUB SPKI)
-openssl genpkey -algorithm ed25519 -out kasir.priv
-openssl pkey -in kasir.priv -pubout -out kasir.pub
+openssl genpkey -algorithm ed25519 -out device-01.priv
+openssl pkey -in device-01.priv -pubout -out device-01.pub
 # terminal 1 — serve keeps running until Ctrl-C:
-bun bin/fielog.ts serve --port 8091 --file ./relay.log --trust kasir=./kasir.pub
+bun bin/fielog.ts serve --port 8091 --file ./relay.log --trust device-01=./device-01.pub
 # terminal 2:
-bun bin/fielog.ts sync --file ./kasir.db --relay ws://127.0.0.1:8091 --key ./kasir.priv --as kasir
+bun bin/fielog.ts sync --file ./ledger.db --relay ws://127.0.0.1:8091 --key ./device-01.priv --as device-01
 ```
 
 Or in code (`src/kernel.ts:capToken`, `src/relay.ts:WsRelayClientOpts`):
@@ -65,15 +65,15 @@ Or in code (`src/kernel.ts:capToken`, `src/relay.ts:WsRelayClientOpts`):
 ```js
 import { createKernel, generateDeviceKey, WsRelayServer, WsRelayClient } from 'fielog';
 
-const k1 = generateDeviceKey('hp1');
+const k1 = generateDeviceKey('device-01');
 const server = new WsRelayServer({ port: 8091, file: 'relay.log',
-  trustedDevices: { hp1: k1.publicKeyPem } });
+  trustedDevices: { 'device-01': k1.publicKeyPem } });
 await server.start();
-const hp1 = await createKernel({ file: 'hp1.db', deviceId: 'hp1', privateKeyPem: k1.privateKeyPem });
-const c1 = new WsRelayClient('ws://127.0.0.1:8091', { capToken: hp1.capToken(k1.privateKeyPem) });
-await hp1.sync(c1, { trustedDevices: { hp1: k1.publicKeyPem } });
+const node1 = await createKernel({ file: 'device-01.db', deviceId: 'device-01', privateKeyPem: k1.privateKeyPem });
+const c1 = new WsRelayClient('ws://127.0.0.1:8091', { capToken: node1.capToken(k1.privateKeyPem) });
+await node1.sync(c1, { trustedDevices: { 'device-01': k1.publicKeyPem } });
 c1.close();
-hp1.close();
+node1.close();
 server.kill();
 ```
 

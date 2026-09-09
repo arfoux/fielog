@@ -12,10 +12,10 @@ import { bitflip, tornTail, truncateTail } from '../scripts/corrupt-gen.ts';
 const N = 10;
 
 async function seed(dir: string): Promise<{ file: string; logPath: string }> {
-  const file = join(dir, 'kasir.db');
+  const file = join(dir, 'ledger.db');
   const k = await createKernel({ file });
   for (let i = 0; i < N; i++) {
-    await k.append({ type: 'bayar', nominal: 1000 + i, oleh: 'budi' });
+    await k.append({ type: 'payment', amount: 1000 + i, actor: 'budi' });
   }
   const logPath = k.logPath;
   k.close();
@@ -74,7 +74,7 @@ describe('corrupt-gen detector', () => {
       assert.equal(h.repairedTail, false);
       assert.equal(k.verifyLog().ok, true);
       const rows = await k.query<{ total: number }>(
-        `SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`,
+        `SELECT SUM(amount) AS total FROM payment WHERE voided = 0`,
       );
       let expected = 0;
       for (let i = 0; i < N - 2; i++) expected += 1000 + i;

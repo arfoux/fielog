@@ -2,14 +2,14 @@
 
 Model calculator (~35 lines) + state-vs-implementation comparison every 100
 steps. Port of skill-6 SOLID to fielog: a plain-arithmetic oracle mirroring
-`route()` routing in `src/store.ts` (only `bayar` / `stock.add` / `stock.sell` /
+`route()` routing in `src/store.ts` (only `payment` / `stock.add` / `stock.sell` /
 `undo.compensate` cases), comparison results reported loudly with seed + step
 + op log.
 
 ## Files
 
 - `scripts/model-oracle.ts` — `Oracle` (~35 lines) + `checkOracle` (3 SELECTs
-  vs the read-model: per-oleh live sums, stock qty, voided id set).
+  vs the read-model: per-actor live sums, stock qty, voided id set).
 - `test/model-oracle.test.ts` — 1000 seeded mixed ops (`20260906`), check
   every 100 steps + final converge; lightweight deterministic sibling of
   `test/model-fuzz.test.ts` (5000 steps, inline oracle — read-only).
@@ -20,13 +20,13 @@ steps. Port of skill-6 SOLID to fielog: a plain-arithmetic oracle mirroring
 
 | store.ts `route()` | oracle |
 |---|---|
-| `bayar` insert + `resolvePendingUndos` (early undo -> void) | `bayar()`: `pend` -> `void`, else `pay[oleh] += n` |
+| `payment` insert + `resolvePendingUndos` (early undo -> void) | `payment()`: `pend` -> `void`, else `pay[actor] += n` |
 | `stock.add` adds qty + records move | `add()`: `pend` -> `void`, else `stk[item] += q`, `mov[id]` |
 | `stock.sell` oversell -> move voided + conflict, without reducing stock | `sell()`: short stock -> `void`, else `stk[item] -= q`, `mov[id] = -q` |
-| `undo.compensate` bayar -> void; live move -> void + qty refund; unknown -> parks in `records` | `undo()`: live bayar -> reduce `pay`, void; live move -> `stk -= signed`, void; unknown -> `pend` |
-| target landing after a parked undo -> `resolvePendingUndos` voids it | `bayar/add/sell` checks `pend` first — same effect oracle-side |
+| `undo.compensate` payment -> void; live move -> void + qty refund; unknown -> parks in `records` | `undo()`: live payment -> reduce `pay`, void; live move -> `stk -= signed`, void; unknown -> `pend` |
+| target landing after a parked undo -> `resolvePendingUndos` voids it | `payment/add/sell` checks `pend` first — same effect oracle-side |
 Deliberately out of scope (like fuzz): `payment.*` / settle transitions —
-the op mix is only bayar/undo/stock + kill-respawn/sync/replay.
+the op mix is only payment/undo/stock + kill-respawn/sync/replay.
 
 
 ## run

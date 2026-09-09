@@ -22,10 +22,10 @@ describe('flfix-kernel', () => {
 
   it('deviceId mismatch stored vs explicit throws instead of split-brain', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'flfix-kernel-device-'));
-    const file = join(dir, 'kasir.db');
+    const file = join(dir, 'ledger.db');
     const a = await createKernel({ file, deviceId: 'device-A' });
     closers.push(() => a.close());
-    await a.append({ type: 'bayar', nominal: 1000, oleh: 'budi' });
+    await a.append({ type: 'payment', amount: 1000, actor: 'budi' });
     a.close();
     closers.pop();
 
@@ -45,13 +45,13 @@ describe('flfix-kernel', () => {
 
   it('restart re-drives a logged-but-unapplied tail split via replay', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'flfix-kernel-split-'));
-    const file = join(dir, 'kasir.db');
+    const file = join(dir, 'ledger.db');
     const k = await createKernel({ file });
-    const parked = await k.append({ type: 'bayar', nominal: 5000, oleh: 'budi' });
+    const parked = await k.append({ type: 'payment', amount: 5000, actor: 'budi' });
     // Simulate the kill between log.append and store.apply: the log line is
     // durable (and the tail — a kill cannot leave a hole under later seqs),
     // the read-model rows are gone. A kill implies a restart, which replays.
-    await k.query(`DELETE FROM bayar WHERE event_id = '${parked.id}'`);
+    await k.query(`DELETE FROM payment WHERE event_id = '${parked.id}'`);
     await k.query(`DELETE FROM _events WHERE id = '${parked.id}'`);
     const gone = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM _events WHERE id = '${parked.id}'`);
     assert.equal(gone[0].n, 0);
@@ -61,15 +61,15 @@ describe('flfix-kernel', () => {
     closers.push(() => k2.close());
     const back = await k2.query<{ n: number }>(`SELECT COUNT(*) AS n FROM _events WHERE id = '${parked.id}'`);
     assert.equal(back[0].n, 1);
-    const rows = await k2.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
+    const rows = await k2.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
     assert.equal(rows[0].total, 5000);
   });
 
   it('undo/settle on unknown ids append blind compensators (peer target may sync later)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'flfix-kernel-guards-'));
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     closers.push(() => k.close());
-    const ev = await k.append({ type: 'bayar', nominal: 2000, oleh: 'budi' });
+    const ev = await k.append({ type: 'payment', amount: 2000, actor: 'budi' });
 
     // Unknown targets succeed: the target may live on an unsynced peer.
     // Convergence is by fold, not by local existence (model-oracle pins this).
@@ -81,14 +81,14 @@ describe('flfix-kernel', () => {
     // Known targets still work.
     const undo = await k.undo(ev.id, 'budi');
     assert.equal(undo.type, 'undo.compensate');
-    const st = await k.append({ type: 'bayar', nominal: 3000, oleh: 'ani' });
+    const st = await k.append({ type: 'payment', amount: 3000, actor: 'ani' });
     const failed = await k.settle(st.id, 'failed', 'ani');
     assert.equal(failed.type, 'payment.failed');
   });
 
   it('capToken default ttl is the auth single source', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'flfix-kernel-cap-'));
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     closers.push(() => k.close());
     assert.equal(CAP_TOKEN_TTL_MS, 15 * 60 * 1000);
     const keys = generateDeviceKey();
@@ -102,10 +102,10 @@ describe('flfix-kernel', () => {
 
   it('truncate is a safe no-op unsealed and serializes with append', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'flfix-kernel-trunc-'));
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     closers.push(() => k.close());
     for (let i = 0; i < 5; i++) {
-      await k.append({ type: 'bayar', nominal: 100 + i, oleh: 'budi' });
+      await k.append({ type: 'payment', amount: 100 + i, actor: 'budi' });
     }
     const noop = await k.truncate();
     assert.equal(noop.removed, 0);
@@ -113,7 +113,7 @@ describe('flfix-kernel', () => {
 
     // Append racing truncate must not corrupt the log or lose events.
     await Promise.all([
-      ...Array.from({ length: 20 }, (_, i) => k.append({ type: 'bayar', nominal: 1000 + i, oleh: 'race' })),
+      ...Array.from({ length: 20 }, (_, i) => k.append({ type: 'payment', amount: 1000 + i, actor: 'race' })),
       ...Array.from({ length: 5 }, () => k.truncate()),
     ]);
     assert.equal(k.verifyLog().ok, true);
@@ -121,7 +121,7 @@ describe('flfix-kernel', () => {
     const rows = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM _events`);
     assert.equal(rows[0].n, 25);
     // Kernel still usable after the race.
-    const tail = await k.append({ type: 'bayar', nominal: 1, oleh: 'budi' });
+    const tail = await k.append({ type: 'payment', amount: 1, actor: 'budi' });
     assert.ok(tail.seq > 0);
   });
 });

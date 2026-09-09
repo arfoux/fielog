@@ -72,17 +72,17 @@ describe('cli signed surface', () => {
 
   it('forged device_id push rejected, valid device syncs', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-cliauth-'));
-    const victim = generateDeviceKey('kasir');
+    const victim = generateDeviceKey('device');
     const attacker = generateDeviceKey('attacker');
-    const victimPub = join(dir, 'kasir.pub');
-    const victimPriv = join(dir, 'kasir.priv');
+    const victimPub = join(dir, 'device.pub');
+    const victimPriv = join(dir, 'device.priv');
     const attackerPriv = join(dir, 'attacker.priv');
     writeFileSync(victimPub, victim.publicKeyPem);
     writeFileSync(victimPriv, victim.privateKeyPem);
     writeFileSync(attackerPriv, attacker.privateKeyPem);
     const relayFile = join(dir, 'relay.log');
 
-    const serve = Bun.spawn([BUN, CLI, 'serve', '--port', '0', '--file', relayFile, '--trust', `kasir=${victimPub}`], {
+    const serve = Bun.spawn([BUN, CLI, 'serve', '--port', '0', '--file', relayFile, '--trust', `device=${victimPub}`], {
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -95,7 +95,7 @@ describe('cli signed surface', () => {
     const prep = Bun.spawn([BUN, '-e', `
 import { createKernel } from ${JSON.stringify(kernelUrl)};
 const k = await createKernel({ file: ${JSON.stringify(adb)} });
-await k.append({ type: 'bayar', nominal: 1000, oleh: 'toko' });
+await k.append({ type: 'payment', amount: 1000, actor: 'toko' });
 k.close();
     `], { stdout: 'pipe', stderr: 'pipe' });
     procs.push(prep);
@@ -103,13 +103,13 @@ k.close();
     assert.equal(await prep.exited, 0, `prep failed: ${prepErr}`);
 
     // Attacker key claiming the victim device id: relay must reject.
-    const forged = await runOnce(['sync', '--file', adb, '--relay', url, '--key', attackerPriv, '--as', 'kasir']);
+    const forged = await runOnce(['sync', '--file', adb, '--relay', url, '--key', attackerPriv, '--as', 'device']);
     assert.notEqual(forged.code, 0, `forged push got through: ${forged.out} ${forged.err}`);
     assert.match(`${forged.out} ${forged.err}`, /rejected|forbidden/);
     assert.equal(readFileSync(relayFile, 'utf8').trim(), '', 'relay stored a forged event');
 
     // Victim key for its own id: accepted.
-    const legit = await runOnce(['sync', '--file', adb, '--relay', url, '--key', victimPriv, '--as', 'kasir']);
+    const legit = await runOnce(['sync', '--file', adb, '--relay', url, '--key', victimPriv, '--as', 'device']);
     assert.equal(legit.code, 0, `valid sync failed: ${legit.err} ${legit.out}`);
     assert.match(legit.out, /acked=1/);
     serve.kill(9);

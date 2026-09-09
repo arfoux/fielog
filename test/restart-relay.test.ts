@@ -28,7 +28,7 @@ describe('relay restart', () => {
     const server = new WsRelayServer({ port: 0, file });
     const port = await server.start();
 
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     closers.push(() => k.close());
     const client = new WsRelayClient(`ws://127.0.0.1:${port}`, { ...fast });
     closers.push(() => client.close());
@@ -36,7 +36,7 @@ describe('relay restart', () => {
     let expected = 0;
     for (let i = 0; i < 30; i++) {
       expected += 700 + i;
-      await k.append({ type: 'bayar', nominal: 700 + i, oleh: 'toko' });
+      await k.append({ type: 'payment', amount: 700 + i, actor: 'toko' });
     }
     const up = await k.sync(client, { chunkSize: 10, ...fast });
     assert.equal(up.acked, 30);
@@ -57,14 +57,14 @@ describe('relay restart', () => {
     // Client works offline through the outage, then resumes on restart.
     for (let i = 0; i < 5; i++) {
       expected += 50 + i;
-      await k.append({ type: 'bayar', nominal: 50 + i, oleh: 'toko' });
+      await k.append({ type: 'payment', amount: 50 + i, actor: 'toko' });
     }
     const re = await k.sync(client, { chunkSize: 10, maxRetries: 20, ...fast });
     assert.equal(re.acked, 5);
     assert.equal(k.ackSeq(), 35);
     assert.equal(server2.size, 35);
 
-    const rows = await k.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
+    const rows = await k.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
     assert.equal(rows[0].total, expected);
   }, 30_000);
 });

@@ -17,10 +17,10 @@ const ev = (id) => {
   const core = {
     id,
     seq: 1,
-    type: 'bayar',
+    type: 'payment',
     device_id: 'd1',
     ts_device: 1,
-    payload: { nominal: 1000 },
+    payload: { amount: 1000 },
     prev_hash: 'GENESIS',
   };
   return { ...core, hash: hashFor(core) };
@@ -37,12 +37,12 @@ describe('auth', () => {
   it('grants gate scopes and revocation kills them', async () => {
     const authority = generateDeviceKey('authority');
     const device = generateDeviceKey();
-    const grant = issueGrant(authority.privateKeyPem, 'hq', device.deviceId, ['kasir:append']);
-    assert.ok(verifyGrant(authority.publicKeyPem, grant, 'kasir:append'));
-    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'kasir:settle'), false);
+    const grant = issueGrant(authority.privateKeyPem, 'hq', device.deviceId, ['payment:append']);
+    assert.ok(verifyGrant(authority.publicKeyPem, grant, 'payment:append'));
+    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'payment:settle'), false);
     const rev = new RevocationList();
     rev.revoke(grant.id);
-    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'kasir:append', rev), false);
+    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'payment:append', rev), false);
   });
 
   it('countersign threshold counts distinct valid devices', async () => {

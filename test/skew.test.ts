@@ -21,21 +21,21 @@ describe('clock skew', () => {
       let expected = 0;
       for (let i = 0; i < 5; i++) {
         expected += 1000 + i;
-        await ka.append({ type: 'bayar', nominal: 1000 + i, oleh: 'skewed' });
+        await ka.append({ type: 'payment', amount: 1000 + i, actor: 'skewed' });
       }
       await ka.sync(relay, { baseMs: 1, maxMs: 30 });
       await kb.sync(relay, { baseMs: 1, maxMs: 30 }); // pulls 5 future-stamped events
-      await kb.append({ type: 'bayar', nominal: 50, oleh: 'sane' }); // small ts, local seq 6
+      await kb.append({ type: 'payment', amount: 50, actor: 'sane' }); // small ts, local seq 6
       expected += 50;
-      const bySeq = await kb.query<{ seq: number; ts_device: number; nominal: number }>(
-        `SELECT e.seq, e.ts_device, b.nominal FROM _events e LEFT JOIN bayar b ON b.event_id = e.id ORDER BY e.seq`,
+      const bySeq = await kb.query<{ seq: number; ts_device: number; amount: number }>(
+        `SELECT e.seq, e.ts_device, b.amount FROM _events e LEFT JOIN payment b ON b.event_id = e.id ORDER BY e.seq`,
       );
       const byTs = await kb.query<{ seq: number }>(`SELECT seq FROM _events ORDER BY ts_device`);
       assert.equal(byTs[0].seq, 6);
       // Skew is really present in the stored stamps.
       assert.ok(bySeq[0].ts_device - bySeq[5].ts_device > SKEW - 60_000);
 
-      const rows = await kb.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
+      const rows = await kb.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
       assert.equal(rows[0].total, expected);
     } finally {
       ka.close();

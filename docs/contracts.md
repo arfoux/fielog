@@ -58,5 +58,5 @@ fixed jitter, function = custom `[0,1)` source.
 Writer output = v0.5 fields + known optionals (`actor, origin_seq,
 origin_device, server_time`); new fields must be optional + unhashed +
 never renamed/repurposed (`docs/compat.md`, `canonicalOf` in `src/log.ts`
-= frozen list). Fixture: `test/fixtures/v05-kasir.log`, pinned by
+= frozen list). Fixture: `test/fixtures/v05-ledger.log`, pinned by
 `test/compat-v05.test.ts`.

@@ -37,25 +37,25 @@ function ev(o: { id: string; seq: number; type: string; payload?: Record<string,
 describe('flfix store audit', () => {
   it('(1) seq collision under a fresh id fails loud, never swallows as replay', () => {
     const s = track(openStore(':memory:'));
-    const a = ev({ id: 'flfix-seq-a', seq: 1, type: 'bayar', payload: { nominal: 100, oleh: 'k' } });
+    const a = ev({ id: 'flfix-seq-a', seq: 1, type: 'payment', payload: { amount: 100, actor: 'k' } });
     s.apply(a);
-    const b = ev({ id: 'flfix-seq-b', seq: 1, type: 'bayar', payload: { nominal: 50, oleh: 'k' } });
+    const b = ev({ id: 'flfix-seq-b', seq: 1, type: 'payment', payload: { amount: 50, actor: 'k' } });
     assert.throws(() => s.apply(b), /UNIQUE|seq/i);
     assert.equal(s.hasId('flfix-seq-a'), true);
     assert.equal(s.hasId('flfix-seq-b'), false);
-    const kept = s.query<{ n: number }>(`SELECT COUNT(*) AS n FROM bayar WHERE event_id = ?`, ['flfix-seq-a']);
+    const kept = s.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment WHERE event_id = ?`, ['flfix-seq-a']);
     assert.equal(kept[0].n, 1);
     // True idempotent replay (same id) stays a silent no-op.
     assert.doesNotThrow(() => s.apply(a));
   });
 
-  it('(2) fractional bayar nominal rejected (integer-money invariant)', () => {
-    assert.throws(() => checkAppend('bayar', { nominal: 10.5 }), /integer/);
-    assert.throws(() => checkAppend('bayar', { nominal: 0.1 }), /integer/);
-    assert.doesNotThrow(() => checkAppend('bayar', { nominal: 100 }));
+  it('(2) fractional payment amount rejected (integer-money invariant)', () => {
+    assert.throws(() => checkAppend('payment', { amount: 10.5 }), /integer/);
+    assert.throws(() => checkAppend('payment', { amount: 0.1 }), /integer/);
+    assert.doesNotThrow(() => checkAppend('payment', { amount: 100 }));
     const s = track(openStore(':memory:'));
     assert.throws(() =>
-      s.apply(ev({ id: 'flfix-frac-1', seq: 1, type: 'bayar', payload: { nominal: 10.5, oleh: 'k' } })),
+      s.apply(ev({ id: 'flfix-frac-1', seq: 1, type: 'payment', payload: { amount: 10.5, actor: 'k' } })),
     );
     assert.equal(s.hasId('flfix-frac-1'), false);
   });
@@ -80,9 +80,9 @@ describe('flfix store audit', () => {
   it('(4) replay counts skipped poison events and still applies the tail', () => {
     const s = track(openStore(':memory:'));
     const events = [
-      ev({ id: 'flfix-rp-g1', seq: 1, type: 'bayar', payload: { nominal: 100, oleh: 'k' } }),
-      ev({ id: 'flfix-rp-pz', seq: 2, type: 'bayar', payload: { nominal: -5, oleh: 'k' } }),
-      ev({ id: 'flfix-rp-g2', seq: 3, type: 'bayar', payload: { nominal: 50, oleh: 'k' } }),
+      ev({ id: 'flfix-rp-g1', seq: 1, type: 'payment', payload: { amount: 100, actor: 'k' } }),
+      ev({ id: 'flfix-rp-pz', seq: 2, type: 'payment', payload: { amount: -5, actor: 'k' } }),
+      ev({ id: 'flfix-rp-g2', seq: 3, type: 'payment', payload: { amount: 50, actor: 'k' } }),
     ];
     const res = s.replay(events);
     assert.equal(res.applied, 2);
@@ -94,7 +94,7 @@ describe('flfix store audit', () => {
 
   it('(5) exciseMissing is atomic: mid-sweep failure rolls everything back', () => {
     const s = track(openStore(':memory:'));
-    const b = ev({ id: 'flfix-ex-b', seq: 1, type: 'bayar', payload: { nominal: 100, oleh: 'k' } });
+    const b = ev({ id: 'flfix-ex-b', seq: 1, type: 'payment', payload: { amount: 100, actor: 'k' } });
     const a = ev({ id: 'flfix-ex-a', seq: 2, type: 'stock.add', payload: { item: 'kopi', qty: 10 } });
     s.apply(b);
     s.apply(a);
@@ -106,7 +106,7 @@ describe('flfix store audit', () => {
     // All-or-nothing: the rows excised before the failure must have rolled back.
     assert.equal(s.hasId('flfix-ex-b'), true);
     assert.equal(s.hasId('flfix-ex-a'), true);
-    assert.equal(s.query<{ n: number }>(`SELECT COUNT(*) AS n FROM bayar WHERE event_id = 'flfix-ex-b'`)[0].n, 1);
+    assert.equal(s.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment WHERE event_id = 'flfix-ex-b'`)[0].n, 1);
     assert.equal(
       s.query<{ n: number }>(`SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = 'flfix-ex-a'`)[0].n,
       1,
@@ -119,7 +119,7 @@ describe('flfix store audit', () => {
 
   it('(6) getEventById quarantines corrupt rows instead of throwing', () => {
     const s = track(openStore(':memory:'));
-    const e = ev({ id: 'flfix-gb-1', seq: 1, type: 'bayar', payload: { nominal: 100, oleh: 'k' } });
+    const e = ev({ id: 'flfix-gb-1', seq: 1, type: 'payment', payload: { amount: 100, actor: 'k' } });
     s.apply(e);
     s.exec(`UPDATE _events SET payload = '{{{corrupt' WHERE id = 'flfix-gb-1'`);
     assert.equal(s.getEventById('flfix-gb-1'), null);
@@ -130,7 +130,7 @@ describe('flfix store audit', () => {
     assert.equal(q.length, 1);
     assert.match(q[0].reason, /corrupt-payload/);
     assert.equal(
-      s.query<{ n: number }>(`SELECT COUNT(*) AS n FROM bayar WHERE event_id = 'flfix-gb-1'`)[0].n,
+      s.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment WHERE event_id = 'flfix-gb-1'`)[0].n,
       0,
     );
     assert.equal(s.getEventById('flfix-gb-1'), null); // stable, still no throw

@@ -12,9 +12,9 @@ blackout: append-only log (source of truth) + SQLite read-model + sync-later.
 ```js
 import { createKernel } from 'fielog';
 
-const k = await createKernel({ file: 'kasir.db' });
-await k.append({ type: 'bayar', nominal: 5000, oleh: 'kasir-1' });
-const rows = await k.query('SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0');
+const k = await createKernel({ file: 'ledger.db' });
+await k.append({ type: 'payment', amount: 5000, actor: 'device-01' });
+const rows = await k.query('SELECT SUM(amount) AS total FROM payment WHERE voided = 0');
 console.log(rows[0].total); // 5000 — IOU_RECORDED, not settled
 k.close();
 ```
@@ -27,7 +27,7 @@ ack. `append`/`query`/`undo` never touch the network — only `sync` does.
 - [install](docs/install.md) — requirements (`bun` >= 1.0), setup, files created
 - [quickstart](docs/quickstart.md) — 1 phone offline, 2 phones syncing (dev + signed mode), runnable
 - [cli](docs/cli.md) — `serve` / `sync` / `demo`, every flag verified against `bin/fielog.ts`
-- Real examples: `demo/kasir-2hp.ts` (`bun run demo`), `example/kasir.mjs` (`bun example/kasir.mjs`)
+- Real examples: `demo/two-node.ts` (`bun run demo`), `example/ledger.mjs` (`bun example/ledger.mjs`)
 
 ## Gallery
 

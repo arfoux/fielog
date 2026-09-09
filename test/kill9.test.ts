@@ -24,7 +24,7 @@ describe('kill9 recovery', () => {
       stdout: 'ignore',
       stderr: 'ignore',
     });
-    const logPath = join(dir, 'kasir.log');
+    const logPath = join(dir, 'ledger.log');
     // Strike while appends are in flight: guaranteed mid-run kill.
     await waitFor(() => {
       try {
@@ -36,7 +36,7 @@ describe('kill9 recovery', () => {
     proc.kill('SIGKILL');
     await proc.exited;
 
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     try {
       const h = k.health();
       assert.ok(h.events >= 50, `expected durable prefix, got ${h.events}`);
@@ -51,11 +51,11 @@ describe('kill9 recovery', () => {
         const t = line.trim();
         if (!t) continue;
         const ev = JSON.parse(t);
-        expected += Number(ev.payload.nominal);
+        expected += Number(ev.payload.amount);
         lines += 1;
       }
       assert.equal(lines, h.events);
-      const rows = await k.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
+      const rows = await k.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
       assert.equal(rows[0].total, expected);
     } finally {
       k.close();

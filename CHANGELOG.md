@@ -13,7 +13,7 @@ Untagged commits are folded into the next tag that shipped them.
 - Bench smoke 2026-09-09 `bun bench/bench-append.ts 200` = 306
   appends/sec, p50 3.07 ms, p99 7.63 ms; full numbers in `docs/bench.md`.
 - Typecheck clean: `PushResult` exported, relay rng field, cas writeSync narrowing.
-- 30 audit suspects fixed: relay fail-closed persist (no ack for unwritten events, ack only stored ids), store seq-vs-id collision no longer swallowed, fractional nominal rejected, sync dead-letter cursors (one poison event never pins push/pull), retain empty-guard returns 0, revokelog convergent tie-break, tombstone guard covers show/target, quota remaining clamped, canonical payload key order, duplicate-id append rejected, seq-gap verification, device mismatch throws (first-explicit adoption allowed), threshold misconfig throws, cas orphan sweep + EEXIST tolerance + fstat + guarded quarantine, deltasync real dead-letter list + honest fetched metric.
+- 30 audit suspects fixed: relay fail-closed persist (no ack for unwritten events, ack only stored ids), store seq-vs-id collision no longer swallowed, fractional amount rejected, sync dead-letter cursors (one poison event never pins push/pull), retain empty-guard returns 0, revokelog convergent tie-break, tombstone guard covers show/target, quota remaining clamped, canonical payload key order, duplicate-id append rejected, seq-gap verification, device mismatch throws (first-explicit adoption allowed), threshold misconfig throws, cas orphan sweep + EEXIST tolerance + fstat + guarded quarantine, deltasync real dead-letter list + honest fetched metric.
 - Kernel split healing is O(1) steady-state (suspect flag + open-time replay); undo/settle stay blind compensators (peer targets may sync later — model-oracle pins this).
 - Perf: relay liveBuf dedupes via persistent Set, token verdicts cached per revoke size; `purgeRevoked` incremental via `sync.purge_seq` cursor + fingerprint; backoff jitter deterministic by default (opt-in random).
 - Suite: 218 tests green, tsc clean.
@@ -37,7 +37,7 @@ Untagged commits are folded into the next tag that shipped them.
 - Corrupt log lines are quarantined to `<log>.quarantine` (with forensics) instead of failing open; torn tail writes from a mid-append kill are truncated on open and reported via `repairedTail`.
 - Wall clocks are display-only: `ts_device` never decides order, `kernel` accepts an injectable `clock`, and ordering stays on the monotonic seq even with 30-minute device skew.
 - New `kernel.health()` (`events`, `quarantined`, `repairedTail`, `gaps`) and `verifyLog()` gap reporting for re-anchored seqs.
-- `kill9` tests fixed to run from any working directory; new `demo/kasir-2hp.ts` (20 offline sales, then two-device sync with equal totals).
+- `kill9` tests fixed to run from any working directory; new `demo/two-node.ts` (20 offline sales, then two-device sync with equal totals).
 
 ## v0.4.0 — relay survives restart
 
@@ -51,7 +51,7 @@ Untagged commits are folded into the next tag that shipped them.
 
 ## v0.6.0 — cli
 
-- New `bin/fielog.ts`: `serve --port <n> --file <relay.log>` runs a file-backed ws relay, `sync --file <kasir.db> --relay <ws url>` pushes and pulls a kernel file's delta, `demo` runs the two-device kasir roundtrip and proves equal totals.
+- New `bin/fielog.ts`: `serve --port <n> --file <relay.log>` runs a file-backed ws relay, `sync --file <ledger.db> --relay <ws url>` pushes and pulls a kernel file's delta, `demo` runs the two-node roundtrip and proves equal totals.
 
 ## v0.7.0 — relay capability tokens
 

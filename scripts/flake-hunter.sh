@@ -2,7 +2,7 @@
 # flake-hunter.sh - rerun one fielog test target N times, report pass-rate,
 # classify each failure as env (timing/socket/resource) or product (assertion/invariant).
 #
-# port of skill-1 (flake-hunter, status MANTAP) to fielog. the skill loop is:
+# port of skill-1 (flake-hunter, status SOLID) to fielog. the skill loop is:
 # run the flaky target N times, keep every log, label each failure env vs
 # product from the log text, and print a pass-rate summary. ambiguous logs
 # default to product so a real bug is never filed as "just flakes".

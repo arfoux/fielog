@@ -76,7 +76,7 @@ describe('flfix-small audit suspects', () => {
   it('guardSeal clamps a seal that would strand a show without its target', () => {
     const { store, done } = memStore();
     closers.push(done);
-    store.apply(mkEv(1, 't1', 'catatan'));
+    store.apply(mkEv(1, 't1', 'note'));
     store.apply(mkEv(2, 'h1', TOMBSTONE_HIDE, { hides: 't1' }));
     store.apply(mkEv(3, 's1', TOMBSTONE_SHOW, { shows: 't1' }));
     // Seal 2 sweeps target+hide but leaves the show orphaned: clamp below all.
@@ -91,9 +91,9 @@ describe('flfix-small audit suspects', () => {
 
   it('hide fails fast on unknown targets and duplicate hides stay safe', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-flfix-hide-'));
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     closers.push(() => k.close());
-    const a = await k.append({ type: 'catatan', payload: { isi: 'struk-1' } });
+    const a = await k.append({ type: 'note', payload: { isi: 'struk-1' } });
     const before = k.health().events;
     // Unknown target: throws before appending, so no poison line is left.
     // (Check-then-append is documented non-atomic: concurrent writers must
@@ -101,7 +101,7 @@ describe('flfix-small audit suspects', () => {
     // the fold stays hidden — so retry-after-racy-check never corrupts.)
     await assert.rejects(hide(k, 'no-such-id'), /ERR_UNKNOWN_TARGET/);
     assert.equal(k.health().events, before);
-    await hide(k, a.id, { reason: 'wrong nominal input' });
+    await hide(k, a.id, { reason: 'wrong amount input' });
     await hide(k, a.id, { reason: 'racy retry' });
     const rows = await k.query<{ n: number }>(
       `SELECT COUNT(*) AS n FROM records WHERE type = '${TOMBSTONE_HIDE}'`,
@@ -111,7 +111,7 @@ describe('flfix-small audit suspects', () => {
 
   it('quota remaining never goes negative; denial stays loud', () => {
     const d = mkdtempSync(join(tmpdir(), 'fielog-flfix-quota-'));
-    const f = join(d, 'kasir.log');
+    const f = join(d, 'ledger.log');
     writeFileSync(f, 'x'.repeat(10));
     const g = openQuotaGuard({ limitBytes: 100, files: [f] });
     g.reserve(90); // 10 used + 90 held = 100: admitted

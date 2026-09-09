@@ -11,7 +11,7 @@ describe('conflict surfacing', () => {
   let k;
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'fielog-conflict-'));
-    k = await createKernel({ file: join(dir, 'kasir.db') });
+    k = await createKernel({ file: join(dir, 'ledger.db') });
   });
   afterEach(() => k?.close());
 
@@ -30,11 +30,11 @@ describe('conflict surfacing', () => {
   });
 
   it('double-settle on money surfaces a conflict row', async () => {
-    const pay = await k.append({ type: 'bayar', nominal: 90000, oleh: 'budi' });
+    const pay = await k.append({ type: 'payment', amount: 90000, actor: 'budi' });
     await k.settle(pay.id, 'settled', 'server');
     await k.settle(pay.id, 'settled', 'server'); // replayed/duplicated ack
 
-    const states = await k.query(`SELECT state FROM bayar WHERE event_id = $id`, { id: pay.id });
+    const states = await k.query(`SELECT state FROM payment WHERE event_id = $id`, { id: pay.id });
     assert.equal(states[0].state, 'SETTLED_ONLINE'); // first write stands
     const conflicts = await k.conflicts();
     assert.ok(conflicts.some((c) => c.kind === 'double-settle'));

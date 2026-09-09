@@ -38,13 +38,13 @@ function isMarkerLine(line: string): boolean {
   }
 }
 
-/** Sum of payload.nominal over every durable (non-marker) log line. */
+/** Sum of payload.amount over every durable (non-marker) log line. */
 function logTotal(logPath: string): { sum: number; count: number } {
   let sum = 0;
   let count = 0;
   for (const line of linesOf(logPath)) {
     if (isMarkerLine(line)) continue;
-    sum += Number((JSON.parse(line) as { payload: { nominal: number } }).payload.nominal);
+    sum += Number((JSON.parse(line) as { payload: { amount: number } }).payload.amount);
     count += 1;
   }
   return { sum, count };
@@ -52,7 +52,7 @@ function logTotal(logPath: string): { sum: number; count: number } {
 
 async function dbTotal(k: { query: <T>(sql: string) => Promise<T[]> }): Promise<{ sum: number; count: number }> {
   const rows = await k.query<{ total: number; n: number }>(
-    `SELECT SUM(nominal) AS total, COUNT(*) AS n FROM bayar WHERE voided = 0`,
+    `SELECT SUM(amount) AS total, COUNT(*) AS n FROM payment WHERE voided = 0`,
   );
   return { sum: rows[0].total, count: rows[0].n };
 }
@@ -63,17 +63,17 @@ describe('chaos-kill', () => {
     writeFileSync(
       join(dir, 'child.ts'),
       `import { createKernel } from ${KERNEL};\n` +
-        `const k = await createKernel({ file: ${JSON.stringify(join(dir, 'kasir.db'))} });\n` +
-        `for (let i = 0; i < 5000; i++) await k.append({ type: 'bayar', nominal: 100 + (i % 997), oleh: 'kasir' });\n` +
+        `const k = await createKernel({ file: ${JSON.stringify(join(dir, 'ledger.db'))} });\n` +
+        `for (let i = 0; i < 5000; i++) await k.append({ type: 'payment', amount: 100 + (i % 997), actor: 'device' });\n` +
         `k.close();\n`,
     );
-    const logPath = join(dir, 'kasir.log');
+    const logPath = join(dir, 'ledger.log');
     const proc = Bun.spawn(['bun', join(dir, 'child.ts')], { stdout: 'ignore', stderr: 'ignore' });
     await waitFor(() => linesOf(logPath).length >= 50);
     proc.kill('SIGKILL');
     await proc.exited;
 
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     try {
       const h = k.health();
       assert.ok(h.events >= 50, `expected durable prefix, got ${h.events}`);
@@ -87,7 +87,7 @@ describe('chaos-kill', () => {
 
       // Continue: the reopened kernel appends on the same chain.
       const before = h.events;
-      for (let i = 0; i < 20; i++) await k.append({ type: 'bayar', nominal: 7, oleh: 'kasir' });
+      for (let i = 0; i < 20; i++) await k.append({ type: 'payment', amount: 7, actor: 'device' });
       assert.equal(k.health().events, before + 20);
       assert.equal((k.verifyLog() as { ok: boolean }).ok, true);
     } finally {
@@ -101,18 +101,18 @@ describe('chaos-kill', () => {
       join(dir, 'child.ts'),
       `import { createKernel } from ${KERNEL};\n` +
         `import { MemoryRelay } from ${SYNC};\n` +
-        `const k = await createKernel({ file: ${JSON.stringify(join(dir, 'kasir.db'))} });\n` +
+        `const k = await createKernel({ file: ${JSON.stringify(join(dir, 'ledger.db'))} });\n` +
         `const relay = new MemoryRelay();\n` +
         `let n = 0;\n` +
         `for (let r = 0; r < 200; r++) {\n` +
-        `  for (let i = 0; i < 10; i++, n++) await k.append({ type: 'bayar', nominal: 100, oleh: 'kasir' });\n` +
+        `  for (let i = 0; i < 10; i++, n++) await k.append({ type: 'payment', amount: 100, actor: 'device' });\n` +
         `  await k.sync(relay, { chunkSize: 10, baseMs: 1 });\n` +
         `  await k.snapshot();\n` +
         `  await k.truncate();\n` +
         `}\n` +
         `k.close();\n`,
     );
-    const logPath = join(dir, 'kasir.log');
+    const logPath = join(dir, 'ledger.log');
     const proc = Bun.spawn(['bun', join(dir, 'child.ts')], { stdout: 'ignore', stderr: 'ignore' });
     // Strike only after a seal completed: first line is the truncate marker.
     await waitFor(() => {
@@ -122,9 +122,9 @@ describe('chaos-kill', () => {
     proc.kill('SIGKILL');
     await proc.exited;
 
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     try {
-      assert.ok(existsSync(join(dir, 'kasir.snapshot.db')), 'snapshot from the pre-kill seal must exist');
+      assert.ok(existsSync(join(dir, 'ledger.snapshot.db')), 'snapshot from the pre-kill seal must exist');
       const v = k.verifyLog() as { ok: boolean; gaps?: number[] };
       assert.equal(v.ok, true);
       assert.deepEqual(v.gaps ?? [], []);
@@ -138,7 +138,7 @@ describe('chaos-kill', () => {
       assert.deepEqual(await dbTotal(k), { sum: 100 * (sealed + kept), count: sealed + kept });
 
       // Continue: append, seal again, chain still verifies.
-      for (let i = 0; i < 10; i++) await k.append({ type: 'bayar', nominal: 100, oleh: 'kasir' });
+      for (let i = 0; i < 10; i++) await k.append({ type: 'payment', amount: 100, actor: 'device' });
       await k.sync(new MemoryRelay(), { chunkSize: 10, baseMs: 1 });
       await k.snapshot();
       await k.truncate();
@@ -156,9 +156,9 @@ describe('chaos-kill', () => {
         `import { MemoryRelay } from ${SYNC};\n` +
         `import { writeFileSync } from 'node:fs';\n` +
         `const dir = ${JSON.stringify(dir)};\n` +
-        `const k = await createKernel({ file: dir + '/kasir.db' });\n` +
+        `const k = await createKernel({ file: dir + '/ledger.db' });\n` +
         `const relay = new MemoryRelay();\n` +
-        `for (let i = 0; i < 500; i++) await k.append({ type: 'bayar', nominal: 100 + (i % 997), oleh: 'kasir' });\n` +
+        `for (let i = 0; i < 500; i++) await k.append({ type: 'payment', amount: 100 + (i % 997), actor: 'device' });\n` +
         `writeFileSync(dir + '/ready', 'appended');\n` +
         `for (let r = 0; r < 30; r++) await k.sync(relay, { chunkSize: 5, baseMs: 1 });\n` +
         `for (;;) await k.sync(relay, { chunkSize: 5, baseMs: 1 });\n`,
@@ -169,7 +169,7 @@ describe('chaos-kill', () => {
     proc.kill('SIGKILL');
     await proc.exited;
 
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     try {
       const h = k.health();
       assert.equal(h.events, 500); // every append finished before the kill window
@@ -180,11 +180,11 @@ describe('chaos-kill', () => {
       await k.sync(relay2, { chunkSize: 5, baseMs: 1 });
       assert.equal(k.ackSeq(), 500);
       assert.equal(relay2.size, 500 - ackBefore);
-      const { sum, count } = logTotal(join(dir, 'kasir.log'));
+      const { sum, count } = logTotal(join(dir, 'ledger.log'));
       assert.deepEqual(await dbTotal(k), { sum, count });
 
       // Continue: new appends sync to the tip.
-      for (let i = 0; i < 10; i++) await k.append({ type: 'bayar', nominal: 3, oleh: 'kasir' });
+      for (let i = 0; i < 10; i++) await k.append({ type: 'payment', amount: 3, actor: 'device' });
       await k.sync(relay2, { chunkSize: 5, baseMs: 1 });
       assert.equal(k.ackSeq(), 510);
       assert.equal(relay2.size, 510 - ackBefore);

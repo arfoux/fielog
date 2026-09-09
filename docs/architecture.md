@@ -6,11 +6,11 @@ Slogan: write anywhere, settle later.
 ```
                 ┌─────────────┐  push/pull delta   ┌──────────────┐
   append ──►    │ log (JSONL) │ ◄────────────────► │ relay (ws)   │
-  query ◄──     │ kasir.log   │   ack cursor       │ relay.log    │
+  query ◄──     │ ledger.log  │   ack cursor       │ relay.log    │
   undo   ──►    ├─────────────┤                    └──────────────┘
   settle ──►    │ store       │
                 │ (SQLite)    │   snapshot / truncate (retention)
-                │ kasir.db    │ ──► kasir.snapshot.db
+                │ ledger.db   │ ──► ledger.snapshot.db
                 └─────────────┘
 ```
 
@@ -19,7 +19,7 @@ Slogan: write anywhere, settle later.
 | module | file | role |
 |---|---|---|
 | log | `log.ts` | JSONL append-only: UUID per event, sha256 hash chain (`GENESIS` anchor), fsync per append, corrupt-line quarantine, torn-tail trim |
-| store | `store.ts` | SQLite read-model (`bun:sqlite`): `bayar` / `stock` / `conflicts` / `_events` / `_meta`; fail-fast `checkAppend` validation before the log is touched |
+| store | `store.ts` | SQLite read-model (`bun:sqlite`): `payment` / `stock` / `conflicts` / `_events` / `_meta`; fail-fast `checkAppend` validation before the log is touched |
 | kernel | `kernel.ts` | the `createKernel({ file })` facade: `append` / `query` / `undo` / `settle` / `sync` / `conflicts` / `health` / `snapshot` / `truncate`. No network except `sync` |
 | sync | `sync.ts` | delta push/pull per `seq` with ack cursors, idempotent per UUID, backoff, dead-letter, multi-relay failover, `MemoryRelay` for tests |
 | deltasync | `deltasync.ts` | manifest-first sync between two replicas (`DeltaPeer { manifest, fetch }`), unsigned — for same-operator replicas |

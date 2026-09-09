@@ -37,7 +37,7 @@ describe('relay capabilities', () => {
 
   it('forged token rejected on push and pull', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-cap-'));
-    const dev = generateDeviceKey('kasir-a');
+    const dev = generateDeviceKey('device-a');
     const attacker = generateDeviceKey('attacker');
     const server = new WsRelayServer({ port: 0, file: join(dir, 'relay.log') });
     server.registerDevice(dev.deviceId, dev.publicKeyPem);
@@ -51,7 +51,7 @@ describe('relay capabilities', () => {
     const c = new WsRelayClient(`ws://127.0.0.1:${port}`, { ...fast, capToken: forged });
     closers.push(() => c.close());
 
-    await k.append({ type: 'bayar', nominal: 1000, oleh: 'toko' });
+    await k.append({ type: 'payment', amount: 1000, actor: 'toko' });
     await rejectsRelay(k.sync(c, { ...fast }));
     await rejectsRelay(c.pull(0));
     assert.equal(server.size, 0);
@@ -60,7 +60,7 @@ describe('relay capabilities', () => {
 
   it('expired token rejected on push and pull', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-cap-'));
-    const dev = generateDeviceKey('kasir-a');
+    const dev = generateDeviceKey('device-a');
     const server = new WsRelayServer({ port: 0, file: join(dir, 'relay.log') });
     server.registerDevice(dev.deviceId, dev.publicKeyPem);
     closers.push(() => server.kill());
@@ -72,7 +72,7 @@ describe('relay capabilities', () => {
     const c = new WsRelayClient(`ws://127.0.0.1:${port}`, { ...fast, capToken: expired });
     closers.push(() => c.close());
 
-    await k.append({ type: 'bayar', nominal: 500, oleh: 'toko' });
+    await k.append({ type: 'payment', amount: 500, actor: 'toko' });
     await rejectsRelay(k.sync(c, { ...fast }));
     await rejectsRelay(c.pull(0));
     assert.equal(server.size, 0);
@@ -80,8 +80,8 @@ describe('relay capabilities', () => {
 
   it('revoked device rejected after revoke broadcast', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-cap-'));
-    const devA = generateDeviceKey('kasir-a');
-    const devB = generateDeviceKey('kasir-b');
+    const devA = generateDeviceKey('device-a');
+    const devB = generateDeviceKey('device-b');
     const server = new WsRelayServer({ port: 0, file: join(dir, 'relay.log') });
     server.registerDevice(devA.deviceId, devA.publicKeyPem);
     server.registerDevice(devB.deviceId, devB.publicKeyPem);
@@ -102,7 +102,7 @@ describe('relay capabilities', () => {
     closers.push(() => cb.close());
 
     // Both connected: baseline push works, witness pull establishes its socket.
-    await ka.append({ type: 'bayar', nominal: 100, oleh: 'toko' });
+    await ka.append({ type: 'payment', amount: 100, actor: 'toko' });
     const up = await ka.sync(ca, { ...fast });
     assert.equal(up.acked, 1);
     await cb.pull(0);
@@ -112,7 +112,7 @@ describe('relay capabilities', () => {
     // Tombstone reaches the connected witness.
     await waitFor(() => cb.revokedNotices.includes(devA.deviceId));
 
-    await ka.append({ type: 'bayar', nominal: 200, oleh: 'toko' });
+    await ka.append({ type: 'payment', amount: 200, actor: 'toko' });
     await rejectsRelay(ka.sync(ca, { ...fast }));
     await rejectsRelay(ca.pull(0));
     assert.ok(server.isRevoked(devA.deviceId));
@@ -121,8 +121,8 @@ describe('relay capabilities', () => {
   it('valid device unaffected and revocation survives relay restart', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-cap-'));
     const file = join(dir, 'relay.log');
-    const devA = generateDeviceKey('kasir-a');
-    const devB = generateDeviceKey('kasir-b');
+    const devA = generateDeviceKey('device-a');
+    const devB = generateDeviceKey('device-b');
     const trusted = { [devA.deviceId]: devA.publicKeyPem, [devB.deviceId]: devB.publicKeyPem };
     const server = new WsRelayServer({ port: 0, file, trustedDevices: trusted });
     closers.push(() => server.kill());
@@ -139,7 +139,7 @@ describe('relay capabilities', () => {
     server.revokeDevice(devA.deviceId);
 
     // Valid device keeps pushing and pulling through the revocation.
-    await kb.append({ type: 'bayar', nominal: 700, oleh: 'toko' });
+    await kb.append({ type: 'payment', amount: 700, actor: 'toko' });
     const up = await kb.sync(cb, { ...fast });
     assert.equal(up.acked, 1);
     const down = await kb.sync(cb, { ...fast });
@@ -159,10 +159,10 @@ describe('relay capabilities', () => {
       capToken: ka.capToken(devA.privateKeyPem),
     });
     closers.push(() => ca.close());
-    await ka.append({ type: 'bayar', nominal: 50, oleh: 'toko' });
+    await ka.append({ type: 'payment', amount: 50, actor: 'toko' });
     await rejectsRelay(ka.sync(ca, { maxRetries: 3, ...fast }));
 
-    await kb.append({ type: 'bayar', nominal: 51, oleh: 'toko' });
+    await kb.append({ type: 'payment', amount: 51, actor: 'toko' });
     const up2 = await kb.sync(cb, { maxRetries: 20, ...fast });
     assert.equal(up2.acked, 1);
     assert.equal(server2.size, 2);

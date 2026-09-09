@@ -35,9 +35,9 @@ describe('corpus-gen replay', () => {
     const c = genCorpus(42, 200);
     const m = corpusManifest(c);
     assert.equal(m.n, 200);
-    assert.equal(m.counts.bayar + m.counts.add + m.counts.sell + m.counts.undo, 200);
+    assert.equal(m.counts.payment + m.counts.add + m.counts.sell + m.counts.undo, 200);
     const dir = mkdtempSync(join(tmpdir(), 'fielog-corpus-gen-'));
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     try {
       const o = new Oracle();
       const q = (sql: string) => k.query(sql) as Promise<Record<string, unknown>[]>;
@@ -46,10 +46,10 @@ describe('corpus-gen replay', () => {
       // targets resolve through the same map, keeping both books aligned.
       const idMap = new Map<string, string>();
       for (const e of c.events) {
-        if (e.type === 'bayar') {
-          const ev = await k.append({ type: 'bayar', nominal: e.payload['nominal'], oleh: e.payload['oleh'] });
+        if (e.type === 'payment') {
+          const ev = await k.append({ type: 'payment', amount: e.payload['amount'], actor: e.payload['actor'] });
           idMap.set(e.id, ev.id);
-          o.bayar(ev.id, Number(e.payload['nominal']), String(e.payload['oleh']));
+          o.payment(ev.id, Number(e.payload['amount']), String(e.payload['actor']));
         } else if (e.type === 'stock.add') {
           const ev = await k.append({ type: 'stock.add', payload: { item: e.payload['item'], qty: e.payload['qty'] } });
           idMap.set(e.id, ev.id);
@@ -69,7 +69,7 @@ describe('corpus-gen replay', () => {
       assert.deepEqual(k.verifyLog(), { ok: true });
       console.log(
         `[corpus-gen] replay seed=42 n=200 sha=${m.sha.slice(0, 12)} ` +
-          `bayar=${m.counts.bayar} add=${m.counts.add} sell=${m.counts.sell} undo=${m.counts.undo} verify=ok`,
+          `payment=${m.counts.payment} add=${m.counts.add} sell=${m.counts.sell} undo=${m.counts.undo} verify=ok`,
       );
     } finally {
       k.close();

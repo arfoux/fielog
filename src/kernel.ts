@@ -20,7 +20,7 @@ import { clampSealToStored, takeSnapshot, sweepLogFile } from './retain.js';
 import { CAP_TOKEN_TTL_MS, mintCapToken, signEvent, type CapToken } from './auth.js';
 
 export interface KernelOpts {
-  file: string; // e.g. 'kasir.db' (+ sidecar 'kasir.log')
+  file: string; // e.g. 'ledger.db' (+ sidecar 'ledger.log')
   deviceId?: string;
   /** Wall-clock source for ts_device (display only, never order). Test seam for skew. */
   clock?: () => number;
@@ -92,7 +92,7 @@ function toAppendInput(args: AppendArgs, deviceId: string, clock: () => number):
     payload?: Record<string, unknown>;
   } & Record<string, unknown>;
   if (!type) throw new Error('append: type is required');
-  // Shorthand (README): append({type:'bayar', nominal, oleh}) → payload.
+  // Shorthand (README): append({type:'payment', amount, actor}) → payload.
   // Explicit: append({type, payload}) — extra keys merge under payload.
   const { device_id: _d, id: _i, ts_device: _t, ...clean } = rest;
   void _d;

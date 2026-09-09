@@ -1,12 +1,12 @@
 # compat: v0.5 log format
 
-Reader and writer both keep backward compat with the v0.5-era `kasir.log`.
+Reader and writer both keep backward compat with the v0.5-era `ledger.log`.
 
 ## v0.5 event fields (required)
 
 `id, seq, type, device_id, ts_device, payload, prev_hash, hash`.
 One JSON object per line, `seq` monotonic from 1, `prev_hash` chains to
-`GENESIS` on seq 1. Reference: `test/fixtures/v05-kasir.log` (5 events,
+`GENESIS` on seq 1. Reference: `test/fixtures/v05-ledger.log` (5 events,
 hand-written, minimal fields, no new features).
 
 ## superset rule (writer)
@@ -26,7 +26,7 @@ Rules for any new event field:
 ## proof
 
 `test/compat-v05.test.ts`: opens the v0.5 fixture in a fresh kernel,
-checks `verifyLog()`, replays into the read-model (bayar total 40000,
+checks `verifyLog()`, replays into the read-model (payment total 40000,
 kopi stock 97), appends seq 6 chained on the fixture tip, then asserts
 every written line carries all v0.5 fields, no unknown fields, and
 hash-verifies with optional fields stripped.

@@ -22,9 +22,9 @@ file=<file>` + `ready port=<port>`; lives until `SIGINT`/`SIGTERM`.
 
 ```sh
 # one time only: mint the device key (standard PEM: PRIV PKCS#8, PUB SPKI)
-openssl genpkey -algorithm ed25519 -out kasir.priv
-openssl pkey -in kasir.priv -pubout -out kasir.pub
-bun bin/fielog.ts serve --port 8091 --file ./relay.log --trust kasir=./kasir.pub
+openssl genpkey -algorithm ed25519 -out device-01.priv
+openssl pkey -in device-01.priv -pubout -out device-01.pub
+bun bin/fielog.ts serve --port 8091 --file ./relay.log --trust device-01=./device-01.pub
 bun bin/fielog.ts serve --port 8091 --file ./relay.log --unsigned   # dev only
 ```
 
@@ -32,7 +32,7 @@ bun bin/fielog.ts serve --port 8091 --file ./relay.log --unsigned   # dev only
 
 | flag | required | meaning |
 |---|---|---|
-| `--file <kasir.db>` | yes | local kernel file |
+| `--file <ledger.db>` | yes | local kernel file |
 | `--relay <ws url>` | yes | relay URL, e.g. `ws://127.0.0.1:8091` |
 | `--key <priv.pem>` | yes, unless `--unsigned` | device privkey; the capability token is minted via `kernel.capToken` |
 | `--as <device>` | yes with `--key` | signing device id + token owner |
@@ -45,15 +45,15 @@ defaults to 10 in `pushPending`) — for bulk use the `kernel.sync` API with
 `{ chunkSize: 500 }`.
 
 ```sh
-bun bin/fielog.ts sync --file ./kasir.db --relay ws://127.0.0.1:8091 --key ./kasir.priv --as kasir
-bun bin/fielog.ts sync --file ./kasir.db --relay ws://127.0.0.1:8091 --unsigned   # dev only
+bun bin/fielog.ts sync --file ./ledger.db --relay ws://127.0.0.1:8091 --key ./device-01.priv --as device-01
+bun bin/fielog.ts sync --file ./ledger.db --relay ws://127.0.0.1:8091 --unsigned   # dev only
 ```
 
-## `demo` — 2-phone kasir (no flags)
+## `demo` — two-node (no flags)
 
-`bun bin/fielog.ts demo`: 20 offline sales on hp1, two-sided signed-mode sync,
-then proves `hp1 == hp2 == expected`, else exit 1
-(`cmdDemo`). Output: `sync: hp1 = ... | hp2 = ... | expected = ...` and
+`bun bin/fielog.ts demo`: 20 offline sales on device-01, two-sided signed-mode sync,
+then proves `device-01 == device-02 == expected`, else exit 1
+(`cmdDemo`). Output: `sync: device-01 = ... | device-02 = ... | expected = ...` and
 `match on both sides, totals agree`.
 
 ## exit code

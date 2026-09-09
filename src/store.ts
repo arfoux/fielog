@@ -1,5 +1,5 @@
 // store.ts — SQLite read-model: apply/replay/materialize over the log.
-// kasir.db is plain SQLite (opens in DBeaver). Bun runtime: bun:sqlite.
+// ledger.db is plain SQLite (opens in DBeaver). Bun runtime: bun:sqlite.
 import { Database } from 'bun:sqlite';
 import type { LogEvent } from './log.js';
 
@@ -69,15 +69,15 @@ const TERMINAL_STATES: Record<string, true> = {
  */
 export function checkAppend(type: string, payload: Record<string, unknown>): void {
   const p = payload ?? {};
-  if (type === 'bayar') {
-    const nominal = Number(p['nominal']);
-    if (!Number.isFinite(nominal) || !Number.isInteger(nominal) || nominal <= 0) {
-      throw new Error(`bayar rejected: nominal must be a positive integer (got ${String(p['nominal'])})`);
+  if (type === 'payment') {
+    const amount = Number(p['amount']);
+    if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
+      throw new Error(`payment rejected: amount must be a positive integer (got ${String(p['amount'])})`);
     }
     const state = String(p['state'] ?? MoneyState.IOU_RECORDED);
     if (!MONEY_APPEND_STATES[state]) {
       throw new Error(
-        `bayar rejected: state '${state}' cannot be recorded offline (use DRAFT or IOU_RECORDED; settlement needs online ack)`,
+        `payment rejected: state '${state}' cannot be recorded offline (use DRAFT or IOU_RECORDED; settlement needs online ack)`,
       );
     }
   } else if (type === 'stock.add') {
@@ -111,11 +111,11 @@ CREATE TABLE IF NOT EXISTS _events(
   prev_hash TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS _meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS bayar(
+CREATE TABLE IF NOT EXISTS payment(
   seq INTEGER PRIMARY KEY,
   event_id TEXT UNIQUE NOT NULL,
-  nominal INTEGER NOT NULL,
-  oleh TEXT,
+  amount INTEGER NOT NULL,
+  actor TEXT,
   state TEXT NOT NULL,
   voided INTEGER NOT NULL DEFAULT 0
 );
@@ -243,9 +243,9 @@ export function openStore(path: string): EventStore {
         continue;
       }
       if (reverses !== target) continue;
-      const b = all<{ seq: number }>(db, `SELECT seq FROM bayar WHERE event_id = ?`, target);
+      const b = all<{ seq: number }>(db, `SELECT seq FROM payment WHERE event_id = ?`, target);
       if (b.length) {
-        run(db, `UPDATE bayar SET voided = 1 WHERE event_id = ?`, target);
+        run(db, `UPDATE payment SET voided = 1 WHERE event_id = ?`, target);
         continue;
       }
       const m = all<{ item: string; qty: number; voided: number }>(
@@ -298,7 +298,7 @@ export function openStore(path: string): EventStore {
     }
     cands.sort((a, b) => a.seq - b.seq);
     for (const t of cands) {
-      const rows = all<{ state: string }>(db, `SELECT state FROM bayar WHERE event_id = ?`, target);
+      const rows = all<{ state: string }>(db, `SELECT state FROM payment WHERE event_id = ?`, target);
       if (!rows.length) continue;
       if (TERMINAL_STATES[rows[0].state]) {
         // Target landed terminal already: morph into a double-settle for humans.
@@ -314,7 +314,7 @@ export function openStore(path: string): EventStore {
           : t.type === 'payment.failed'
             ? MoneyState.FAILED
             : MoneyState.EXPIRED;
-      run(db, `UPDATE bayar SET state = ? WHERE event_id = ?`, next, target);
+      run(db, `UPDATE payment SET state = ? WHERE event_id = ?`, next, target);
       run(db, `UPDATE conflicts SET status = 'resolved' WHERE id = ?`, t.conflictId);
     }
   }
@@ -322,17 +322,17 @@ export function openStore(path: string): EventStore {
   function route(ev: LogEvent): void {
     const p = ev.payload as Record<string, unknown>;
     switch (ev.type) {
-      case 'bayar': {
+      case 'payment': {
         checkAppend(ev.type, p);
-        const nominal = Number(p['nominal']);
+        const amount = Number(p['amount']);
         const state = String(p['state'] ?? MoneyState.IOU_RECORDED);
         run(
           db,
-          `INSERT INTO bayar(seq,event_id,nominal,oleh,state,voided) VALUES(?,?,?,?,?,0)`,
+          `INSERT INTO payment(seq,event_id,amount,actor,state,voided) VALUES(?,?,?,?,?,0)`,
           ev.seq,
           ev.id,
-          nominal,
-          (p['oleh'] as string) ?? (ev.actor as string) ?? null,
+          amount,
+          (p['actor'] as string) ?? (ev.actor as string) ?? null,
           state,
         );
         // Target landed after its undo/transition parked: resurrect them now.
@@ -346,7 +346,7 @@ export function openStore(path: string): EventStore {
         const target = String(p['event_id'] ?? p['reverses'] ?? '');
         const rows = all<{ state: string; voided: number }>(
           db,
-          `SELECT state, voided FROM bayar WHERE event_id = ?`,
+          `SELECT state, voided FROM payment WHERE event_id = ?`,
           target,
         );
         if (rows.length === 0) {
@@ -368,7 +368,7 @@ export function openStore(path: string): EventStore {
             : ev.type === 'payment.failed'
               ? MoneyState.FAILED
               : MoneyState.EXPIRED;
-        run(db, `UPDATE bayar SET state = ? WHERE event_id = ?`, next, target);
+        run(db, `UPDATE payment SET state = ? WHERE event_id = ?`, next, target);
         break;
       }
       case 'stock.add': {
@@ -409,9 +409,9 @@ export function openStore(path: string): EventStore {
       }
       case 'undo.compensate': {
         const target = String(p['reverses'] ?? '');
-        const b = all<{ seq: number }>(db, `SELECT seq FROM bayar WHERE event_id = ?`, target);
+        const b = all<{ seq: number }>(db, `SELECT seq FROM payment WHERE event_id = ?`, target);
         if (b.length) {
-          run(db, `UPDATE bayar SET voided = 1 WHERE event_id = ?`, target);
+          run(db, `UPDATE payment SET voided = 1 WHERE event_id = ?`, target);
           break;
         }
         const m = all<{ item: string; qty: number; voided: number }>(
@@ -464,7 +464,7 @@ export function openStore(path: string): EventStore {
           Date.now(),
           raw.length ? JSON.stringify(raw[0]) : r.id,
         );
-        run(db, `DELETE FROM bayar WHERE event_id = ?`, r.id);
+        run(db, `DELETE FROM payment WHERE event_id = ?`, r.id);
         const m = all<{ n: number }>(db, `SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = ?`, r.id);
         run(db, `DELETE FROM stock_moves WHERE event_id = ?`, r.id);
         run(db, `DELETE FROM records WHERE event_id = ?`, r.id);
@@ -551,7 +551,7 @@ export function openStore(path: string): EventStore {
       try {
         let moves = 0;
         for (const g of gone) {
-          run(db, `DELETE FROM bayar WHERE event_id = ?`, g.id);
+          run(db, `DELETE FROM payment WHERE event_id = ?`, g.id);
           const m = all<{ n: number }>(db, `SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = ?`, g.id);
           if (m[0]?.n) moves += 1;
           run(db, `DELETE FROM stock_moves WHERE event_id = ?`, g.id);

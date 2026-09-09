@@ -20,8 +20,8 @@ const CHECK_EVERY = Number(process.env.SOAK_CHECK_EVERY ?? 20);
 const SEEDS = process.env.SOAK_SEED ? [Number(process.env.SOAK_SEED)] : FIXED_SEEDS;
 
 interface Model {
-  live: Map<string, number>; // bayar id -> nominal
-  expected: number; // sum of live nominals
+  live: Map<string, number>; // payment id -> amount
+  expected: number; // sum of live amounts
 }
 
 interface Floor {
@@ -41,10 +41,10 @@ async function checkInvariants(k: Kernel, model: Model, relay: MemoryRelay, floo
   assert.equal(h.quarantined, 0);
 
   // Totals match the model.
-  const rows = await k.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
+  const rows = await k.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
   const sqlTotal = rows[0].total ?? 0;
   assert.equal(sqlTotal, model.expected, 'sql total diverges from model');
-  const liveRows = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM bayar WHERE voided = 0`);
+  const liveRows = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment WHERE voided = 0`);
   assert.equal(liveRows[0].n, model.live.size);
 
   // No lost acked events: cursor never regresses and every acked seq is
@@ -72,7 +72,7 @@ async function checkInvariants(k: Kernel, model: Model, relay: MemoryRelay, floo
 
 async function runSoak(seed: number): Promise<{ ops: number; checks: number }> {
   const dir = mkdtempSync(join(tmpdir(), 'fielog-soak-runner-'));
-  const dbPath = join(dir, 'kasir.db');
+  const dbPath = join(dir, 'ledger.db');
   const relay = new MemoryRelay();
   let k: Kernel = await createKernel({ file: dbPath });
   const model: Model = { live: new Map(), expected: 0 };
@@ -82,10 +82,10 @@ async function runSoak(seed: number): Promise<{ ops: number; checks: number }> {
     for (let step = 0; step < STEPS; step++) {
       const r = rng();
       if (r < 0.45) {
-        const nominal = 100 + Math.floor(rng() * 4900);
-        const ev = await k.append({ type: 'bayar', nominal, oleh: 'soak-runner' });
-        model.live.set(ev.id, nominal);
-        model.expected += nominal;
+        const amount = 100 + Math.floor(rng() * 4900);
+        const ev = await k.append({ type: 'payment', amount, actor: 'soak-runner' });
+        model.live.set(ev.id, amount);
+        model.expected += amount;
         floor.total += 1;
       } else if (r < 0.6) {
         // Seal: snapshot always, truncate on coin flip (sealed prefix only).
@@ -132,14 +132,14 @@ describe('soak-runner', () => {
 
   it('seal collision: colliding snapshots sweep only the sealed prefix', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-soak-killer-'));
-    const dbPath = join(dir, 'kasir.db');
+    const dbPath = join(dir, 'ledger.db');
     const relay = new MemoryRelay();
     let k = await createKernel({ file: dbPath });
     try {
       let expected = 0;
       for (let i = 0; i < 10; i++) {
         expected += 100;
-        await k.append({ type: 'bayar', nominal: 100, oleh: 'kasir' });
+        await k.append({ type: 'payment', amount: 100, actor: 'device' });
       }
       const up = await k.sync(relay, { chunkSize: 50, ...fast });
       assert.equal(up.acked, 10);
@@ -149,7 +149,7 @@ describe('soak-runner', () => {
       // Unacked suffix lands after the first seal.
       for (let i = 0; i < 3; i++) {
         expected += 7;
-        await k.append({ type: 'bayar', nominal: 7, oleh: 'kasir' });
+        await k.append({ type: 'payment', amount: 7, actor: 'device' });
       }
       // Second seal collides with the first: ack did not move, seal must not.
       const snap2 = await k.snapshot();
@@ -163,7 +163,7 @@ describe('soak-runner', () => {
       assert.deepEqual(cut, { removed: 10, kept: 3, sealedSeq: 10 });
       assert.deepEqual(k.verifyLog(), { ok: true });
       const rows = await k.query<{ total: number; n: number }>(
-        `SELECT SUM(nominal) AS total, COUNT(*) AS n FROM bayar WHERE voided = 0`,
+        `SELECT SUM(amount) AS total, COUNT(*) AS n FROM payment WHERE voided = 0`,
       );
       assert.equal(rows[0].total, expected);
       assert.equal(rows[0].n, 13);
@@ -176,7 +176,7 @@ describe('soak-runner', () => {
       const cut2 = await k.truncate();
       assert.deepEqual(cut2, { removed: 3, kept: 0, sealedSeq: 13 });
       assert.deepEqual(k.verifyLog(), { ok: true });
-      const rows2 = await k.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
+      const rows2 = await k.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
       assert.equal(rows2[0].total, expected);
       console.log('[soak-runner] killer=seal-collision removed=10+3 kept=3+0 suffix_intact=true');
     } finally {

@@ -21,9 +21,9 @@ describe('revoke-event-log', () => {
     const a = new RevokeLog(registry);
     const b = new RevokeLog(registry);
     // Divergent writes: same genesis base, neither side sees the other.
-    const e1 = a.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-1', deviceId: 'kasir-01', epoch: 1 });
-    const e2 = b.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-2', deviceId: 'kasir-02', epoch: 1 });
-    const e3 = a.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-3', deviceId: 'kasir-01', epoch: 2 });
+    const e1 = a.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-1', deviceId: 'device-01', epoch: 1 });
+    const e2 = b.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-2', deviceId: 'device-02', epoch: 1 });
+    const e3 = a.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-3', deviceId: 'device-01', epoch: 2 });
     assert.equal(e3.prev, e1.hash); // local chain threads the local tip
 
     assert.deepEqual(a.merge(b.snapshot()), { added: 1, skipped: 0, rejected: 0 });
@@ -47,8 +47,8 @@ describe('revoke-event-log', () => {
   it('replay is idempotent', () => {
     const { admin, registry } = adminRig();
     const log = new RevokeLog(registry);
-    log.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-1', deviceId: 'kasir-01', epoch: 1 });
-    log.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-2', deviceId: 'kasir-02', epoch: 1 });
+    log.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-1', deviceId: 'device-01', epoch: 1 });
+    log.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-2', deviceId: 'device-02', epoch: 1 });
     const snap = log.snapshot();
     assert.deepEqual(log.merge(snap), { added: 0, skipped: 2, rejected: 0 });
     assert.equal(log.append({ ...snap[0] }), 'duplicate');
@@ -64,7 +64,7 @@ describe('revoke-event-log', () => {
     // Attacker key signs for the admin id: signature cannot verify.
     const forged = createRevokeEvent(attacker.privateKeyPem, admin.deviceId, {
       tokenId: 'tok-9',
-      deviceId: 'kasir-09',
+      deviceId: 'device-09',
       epoch: 1,
     });
     assert.equal(verifyRevokeEvent(registry, forged), false);
@@ -73,7 +73,7 @@ describe('revoke-event-log', () => {
     // Valid signature transplanted onto an edited epoch: hash mismatch.
     const good = createRevokeEvent(admin.privateKeyPem, admin.deviceId, {
       tokenId: 'tok-9',
-      deviceId: 'kasir-09',
+      deviceId: 'device-09',
       epoch: 1,
     });
     assert.equal(verifyRevokeEvent(registry, good), true);
@@ -83,7 +83,7 @@ describe('revoke-event-log', () => {
     // Unknown admin: well-formed and self-signed, but not trusted.
     const stranger = createRevokeEvent(attacker.privateKeyPem, attacker.deviceId, {
       tokenId: 'tok-9',
-      deviceId: 'kasir-09',
+      deviceId: 'device-09',
       epoch: 1,
     });
     assert.throws(() => log.append(stranger), /revoke rejected/);
@@ -100,9 +100,9 @@ describe('revoke-event-log', () => {
   it('cursor diff returns only the unseen suffix', () => {
     const { admin, registry } = adminRig();
     const log = new RevokeLog(registry);
-    log.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-1', deviceId: 'kasir-01', epoch: 1 });
-    log.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-2', deviceId: 'kasir-02', epoch: 1 });
-    log.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-3', deviceId: 'kasir-01', epoch: 2 });
+    log.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-1', deviceId: 'device-01', epoch: 1 });
+    log.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-2', deviceId: 'device-02', epoch: 1 });
+    log.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-3', deviceId: 'device-01', epoch: 2 });
 
     const d0 = log.diffSince(0);
     assert.equal(d0.events.length, 3);
@@ -117,7 +117,7 @@ describe('revoke-event-log', () => {
     // Peer syncs, appends once, origin pulls only the new tail.
     const peer = new RevokeLog(registry);
     assert.deepEqual(peer.merge(log.snapshot()), { added: 3, skipped: 0, rejected: 0 });
-    peer.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-4', deviceId: 'kasir-02', epoch: 2 });
+    peer.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-4', deviceId: 'device-02', epoch: 2 });
     assert.deepEqual(log.merge(peer.diffSince(3).events), { added: 1, skipped: 0, rejected: 0 });
     assert.equal(log.diffSince(3).events[0].tokenId, 'tok-4');
     assert.equal(log.diffSince(4).cursor, 4);

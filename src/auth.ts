@@ -72,7 +72,7 @@ export const CAP_TOKEN_TTL_MS = 15 * 60 * 1000;
 export interface ScopeGrant {
   id: string;
   deviceId: string;
-  scopes: string[]; // e.g. ['kasir:append', 'kasir:settle']
+  scopes: string[]; // e.g. ['payment:append', 'payment:settle']
   issuedBy: string; // authority deviceId / name
   issuedAt: number;
   expiresAt: number;
@@ -240,9 +240,9 @@ export function authorizeCapToken(opts: {
 }
 
 /**
- * Authorize a kasir-scoped op against an authority-signed grant. Wires the
- * previously call-site-free verifyGrant into the authorize path so kasir
- * scopes (kasir:append, kasir:settle) are gated per grant id, not assumed.
+ * Authorize a payment-scoped op against an authority-signed grant. Wires the
+ * previously call-site-free verifyGrant into the authorize path so payment
+ * scopes (payment:append, payment:settle) are gated per grant id, not assumed.
  */
 export function authorizeGrant(opts: {
   authorityPublicPem: string;

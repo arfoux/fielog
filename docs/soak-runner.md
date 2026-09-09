@@ -42,7 +42,7 @@ Seeded `mulberry32` picks one op per step:
 
 | op | share | effect |
 | --- | --- | --- |
-| `append` | ~45% | `bayar` with random nominal; model records id + total |
+| `append` | ~45% | `payment` with random amount; model records id + total |
 | `seal` | ~15% | `snapshot()` always, `truncate()` on coin flip |
 | `sync` | ~20% | `sync(relay)` with random chunk size; injected drops tolerated, regression is not |
 | `restart` | ~20% | close without cleanup + reopen on the same files; ack cursor must survive |
@@ -50,7 +50,7 @@ Seeded `mulberry32` picks one op per step:
 ## invariants (every N steps + final)
 
 1. `verifyLog` clean, zero quarantined.
-2. `SUM(nominal)` over live `bayar` equals the model total; live count matches.
+2. `SUM(amount)` over live `payment` equals the model total; live count matches.
 3. `ackSeq` never regresses and never exceeds appended total; every acked
    seq is present in `_events` (truncate sweeps the log file, never the
    store — the db keeps answering the full prefix); relay holds every

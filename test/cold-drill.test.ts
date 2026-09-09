@@ -1,6 +1,6 @@
 // Cold-drill (adapted): delete everything except the primary log, then rise
 // from the log alone. fielog has no cold tier (wave-1 fact), so the drill
-// keeps only kasir.log, removes the sqlite read-model + snapshots, and
+// keeps only ledger.log, removes the sqlite read-model + snapshots, and
 // proves replay + verify rebuild identical state. Real files, no mocks.
 import { describe, it } from 'bun:test';
 import assert from 'node:assert/strict';
@@ -10,25 +10,25 @@ import { join } from 'node:path';
 import { createKernel } from '../src/kernel.ts';
 
 const N = 30;
-const nominal = (i: number): number => 1000 + i;
+const amount = (i: number): number => 1000 + i;
 
 describe('cold-drill from primary log only', () => {
-  it('rebuilds identical state after deleting everything but kasir.log', async () => {
+  it('rebuilds identical state after deleting everything but ledger.log', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-cold-drill-'));
-    const file = join(dir, 'kasir.db');
-    const logPath = join(dir, 'kasir.log');
+    const file = join(dir, 'ledger.db');
+    const logPath = join(dir, 'ledger.log');
 
     const seed = await createKernel({ file, deviceId: 'cold-drill-test' });
     let expected = 0;
     try {
       for (let i = 0; i < N; i++) {
-        expected += nominal(i);
-        await seed.append({ type: 'bayar', nominal: nominal(i), oleh: 'cold-drill' });
+        expected += amount(i);
+        await seed.append({ type: 'payment', amount: amount(i), actor: 'cold-drill' });
       }
       assert.equal(seed.health().events, N);
       assert.equal(seed.verifyLog().ok, true);
       const before = await seed.query<{ total: number }>(
-        'SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0',
+        'SELECT SUM(amount) AS total FROM payment WHERE voided = 0',
       );
       assert.equal(before[0].total, expected);
     } finally {
@@ -45,7 +45,7 @@ describe('cold-drill from primary log only', () => {
       return promise;
     };
     for (const f of readdirSync(dir)) {
-      if (f === 'kasir.log') continue;
+      if (f === 'ledger.log') continue;
       const target = join(dir, f);
       let lastErr: unknown = null;
       for (let attempt = 0; attempt < 50; attempt++) {
@@ -60,7 +60,7 @@ describe('cold-drill from primary log only', () => {
       }
       if (lastErr) throw lastErr;
     }
-    assert.deepEqual(readdirSync(dir), ['kasir.log']);
+    assert.deepEqual(readdirSync(dir), ['ledger.log']);
     assert.equal(
       readFileSync(logPath, 'utf8').split('\n').filter((l) => l.trim()).length,
       N,
@@ -74,7 +74,7 @@ describe('cold-drill from primary log only', () => {
       assert.equal(v.ok, true);
       assert.deepEqual(v.gaps ?? [], []);
       const after = await risen.query<{ total: number }>(
-        'SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0',
+        'SELECT SUM(amount) AS total FROM payment WHERE voided = 0',
       );
       assert.equal(after[0].total, expected);
     } finally {

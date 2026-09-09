@@ -28,17 +28,17 @@ From a repo checkout:
 bun bin/fielog.ts demo
 ```
 
-`demo` runs a 2-phone offline kasir, then signed-mode sync, proving equal
+`demo` runs a two-node offline demo, then signed-mode sync, proving equal
 totals on both sides (`bin/fielog.ts:cmdDemo`).
 
 ## Files created at use
 
-`createKernel({ file: 'kasir.db' })` creates two files (`src/kernel.ts:logPathFor`):
+`createKernel({ file: 'ledger.db' })` creates two files (`src/kernel.ts:logPathFor`):
 
 | file | contents |
 |---|---|
-| `kasir.db` | SQLite read-model, opens in DBeaver |
-| `kasir.log` | JSONL append-only, `tail -f` friendly, fsync per append |
+| `ledger.db` | SQLite read-model, opens in DBeaver |
+| `ledger.log` | JSONL append-only, `tail -f` friendly, fsync per append |
 
 Both must be backed up / moved together. See [retention](retention.md)
 for snapshot + truncate.

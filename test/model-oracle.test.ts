@@ -14,12 +14,12 @@ import { Oracle, checkOracle } from '../scripts/model-oracle.ts';
 const STEPS = 1000;
 const CHECK_EVERY = 100;
 const SEED = 20260906;
-const OLEH = ['kasir-a', 'kasir-b'];
+const ACTOR = ['device-a', 'device-b'];
 const ITEMS = ['kopi', 'gula'];
 
 async function runOracle(seed: number): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'fielog-oracle-'));
-  const dbPath = join(dir, 'kasir.db');
+  const dbPath = join(dir, 'ledger.db');
   const relay = new MemoryRelay();
   let k: Kernel = await createKernel({ file: dbPath });
   const o = new Oracle();
@@ -33,12 +33,12 @@ async function runOracle(seed: number): Promise<void> {
       const r = rng();
       let op = '';
       if (r < 0.4 || known.length === 0) {
-        const nominal = 100 + Math.floor(rng() * 4900);
-        const oleh = pick(OLEH);
-        const ev = await k.append({ type: 'bayar', nominal, oleh });
-        o.bayar(ev.id, nominal, oleh);
+        const amount = 100 + Math.floor(rng() * 4900);
+        const actor = pick(ACTOR);
+        const ev = await k.append({ type: 'payment', amount, actor });
+        o.payment(ev.id, amount, actor);
         known.push(ev.id);
-        op = `bayar ${ev.id} nominal=${nominal} oleh=${oleh}`;
+        op = `payment ${ev.id} amount=${amount} actor=${actor}`;
       } else if (r < 0.55) {
         const item = pick(ITEMS);
         const qty = 1 + Math.floor(rng() * 20);

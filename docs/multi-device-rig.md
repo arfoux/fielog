@@ -1,4 +1,4 @@
-# multi-device-rig: kasir-01/kasir-02 rig -> convergence
+# multi-device-rig: device-01/device-02 rig -> convergence
 
 The `scripts/two-device-rig.sh` script runs three two-device scenarios
 through one memory relay (port of skill-11 multi-device-rig, HEALTHY).
@@ -25,9 +25,9 @@ the rig scenarios live in `test/two-device-rig.test.ts`.
 
 | id | name | convergence evidence |
 |---|---|---|
-| s1 | kasir-01 sells offline, kasir-02 pulls until equal | both-side total = sum of n events; re-sync `applied=0` |
+| s1 | device-01 sells offline, device-02 pulls until equal | both-side total = sum of n events; re-sync `applied=0` |
 | s2 | two-way offline collision then converge | both-side total = combined sum of 10+10 events |
-| s3 | relay drops mid-batch then resumes | `relay.size=n` (exact-once by uuid); kasir-02 total = sum of n events |
+| s3 | relay drops mid-batch then resumes | `relay.size=n` (exact-once by uuid); device-02 total = sum of n events |
 
 ## Example output
 

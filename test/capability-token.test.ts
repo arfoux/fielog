@@ -17,7 +17,7 @@ import {
 
 describe('capability tokens (granular per-token-id)', () => {
   it('accepts a valid token for its scope', async () => {
-    const dev = generateDeviceKey('kasir-a');
+    const dev = generateDeviceKey('device-a');
     const now = Date.now();
     const token = mintCapToken(dev.privateKeyPem, dev.deviceId, ['relay:push', 'relay:pull'], CAP_TOKEN_TTL_MS, now);
     assert.ok(token.id.length > 0);
@@ -27,7 +27,7 @@ describe('capability tokens (granular per-token-id)', () => {
   });
 
   it('rejects an expired token', async () => {
-    const dev = generateDeviceKey('kasir-a');
+    const dev = generateDeviceKey('device-a');
     const now = Date.now();
     const expired = mintCapToken(dev.privateKeyPem, dev.deviceId, ['relay:push'], CAP_TOKEN_TTL_MS, now - CAP_TOKEN_TTL_MS - 1000);
     assert.equal(verifyCapToken(dev.publicKeyPem, expired, 'relay:push', undefined, now), false);
@@ -36,7 +36,7 @@ describe('capability tokens (granular per-token-id)', () => {
   });
 
   it('rejects a revoked token id while a sibling token lives', async () => {
-    const dev = generateDeviceKey('kasir-a');
+    const dev = generateDeviceKey('device-a');
     const now = Date.now();
     const dead = mintCapToken(dev.privateKeyPem, dev.deviceId, ['relay:push'], CAP_TOKEN_TTL_MS, now);
     const live = mintCapToken(dev.privateKeyPem, dev.deviceId, ['relay:push'], CAP_TOKEN_TTL_MS, now);
@@ -48,7 +48,7 @@ describe('capability tokens (granular per-token-id)', () => {
   });
 
   it('rejects a device-tombstoned token at the authorize gate', async () => {
-    const dev = generateDeviceKey('kasir-a');
+    const dev = generateDeviceKey('device-a');
     const now = Date.now();
     const token = mintCapToken(dev.privateKeyPem, dev.deviceId, ['relay:push'], CAP_TOKEN_TTL_MS, now);
     const verdict = authorizeCapToken({
@@ -63,26 +63,26 @@ describe('capability tokens (granular per-token-id)', () => {
   });
 
   it('gates scope: wrong scope rejected at verify and authorize', async () => {
-    const dev = generateDeviceKey('kasir-a');
+    const dev = generateDeviceKey('device-a');
     const now = Date.now();
     const pushOnly = mintCapToken(dev.privateKeyPem, dev.deviceId, ['relay:push'], CAP_TOKEN_TTL_MS, now);
     assert.equal(verifyCapToken(dev.publicKeyPem, pushOnly, 'relay:pull', undefined, now), false);
     assert.equal(authorizeCapToken({ publicKeyPem: dev.publicKeyPem, token: pushOnly, scope: 'relay:pull', now }).ok, false);
   });
 
-  it('gates kasir scopes through the grant authorize path', async () => {
+  it('gates device scopes through the grant authorize path', async () => {
     const authority = generateDeviceKey('authority');
-    const device = generateDeviceKey('kasir-a');
+    const device = generateDeviceKey('device-a');
     const now = Date.now();
-    const grant = issueGrant(authority.privateKeyPem, 'hq', device.deviceId, ['kasir:append'], GRANT_TTL_MS, now);
-    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'kasir:append', undefined, now), true);
-    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'kasir:settle', undefined, now), false);
+    const grant = issueGrant(authority.privateKeyPem, 'hq', device.deviceId, ['payment:append'], GRANT_TTL_MS, now);
+    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'payment:append', undefined, now), true);
+    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'payment:settle', undefined, now), false);
     assert.equal(
-      authorizeGrant({ authorityPublicPem: authority.publicKeyPem, grant, scope: 'kasir:settle', now }).ok,
+      authorizeGrant({ authorityPublicPem: authority.publicKeyPem, grant, scope: 'payment:settle', now }).ok,
       false,
     );
     const rev = new RevocationList();
     rev.revoke(grant.id);
-    assert.equal(authorizeGrant({ authorityPublicPem: authority.publicKeyPem, grant, scope: 'kasir:append', revocations: rev, now }).ok, false);
+    assert.equal(authorizeGrant({ authorityPublicPem: authority.publicKeyPem, grant, scope: 'payment:append', revocations: rev, now }).ok, false);
   });
 });

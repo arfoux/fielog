@@ -53,8 +53,8 @@ describe('tombstone', () => {
   it('hide folds in seq order and show lifts', () => {
     const { store, done } = memStore();
     closers.push(done);
-    store.apply(mkEv(1, 't1', 'catatan', { isi: 'a' }));
-    store.apply(mkEv(2, 't2', 'catatan', { isi: 'b' }));
+    store.apply(mkEv(1, 't1', 'note', { isi: 'a' }));
+    store.apply(mkEv(2, 't2', 'note', { isi: 'b' }));
     store.apply(mkEv(3, 'h1', TOMBSTONE_HIDE, { hides: 't1' }));
     store.apply(mkEv(4, 'h2', TOMBSTONE_HIDE, { hides: 't2' }));
     assert.deepEqual([...hiddenIds(store)].sort(), ['t1', 't2']);
@@ -70,7 +70,7 @@ describe('tombstone', () => {
   it('malformed tombstone bodies never break the fold', () => {
     const { store, done } = memStore();
     closers.push(done);
-    store.apply(mkEv(1, 't1', 'catatan'));
+    store.apply(mkEv(1, 't1', 'note'));
     store.exec(`INSERT INTO records(seq,event_id,type,body) VALUES(2,'bad','${TOMBSTONE_HIDE}','{oops')`);
     store.apply(mkEv(3, 'h1', TOMBSTONE_HIDE, { hides: 't1' }));
     assert.equal(isHidden(store, 't1'), true);
@@ -80,8 +80,8 @@ describe('tombstone', () => {
   it('guardSeal never splits a hide/target pair', () => {
     const { store, done } = memStore();
     closers.push(done);
-    store.apply(mkEv(1, 't1', 'catatan'));
-    store.apply(mkEv(2, 'other', 'catatan'));
+    store.apply(mkEv(1, 't1', 'note'));
+    store.apply(mkEv(2, 'other', 'note'));
     store.apply(mkEv(3, 'h1', TOMBSTONE_HIDE, { hides: 't1' }));
     const whole = guardSeal(store, [1, 2, 3], 3, 5);
     assert.equal(whole.effective, 3);
@@ -95,13 +95,13 @@ describe('tombstone', () => {
   it('holds block the sweep partially and release unblocks', () => {
     const { store, done } = memStore();
     closers.push(done);
-    store.apply(mkEv(1, 'a', 'catatan'));
-    store.apply(mkEv(2, 'b', 'catatan'));
-    store.apply(mkEv(3, 'c', 'catatan'));
-    hold(store, 'b', 'audit dispute kasir-02');
+    store.apply(mkEv(1, 'a', 'note'));
+    store.apply(mkEv(2, 'b', 'note'));
+    store.apply(mkEv(3, 'c', 'note'));
+    hold(store, 'b', 'audit dispute device-02');
     assert.equal(isHeld(store, 'b'), true);
     assert.equal(isHeld(store, 'a'), false);
-    assert.deepEqual(holds(store), [{ id: 'b', reason: 'audit dispute kasir-02', seq: 2 }]);
+    assert.deepEqual(holds(store), [{ id: 'b', reason: 'audit dispute device-02', seq: 2 }]);
     const guarded = guardSeal(store, [1, 2, 3], 3, 3);
     assert.equal(guarded.effective, 1);
     assert.equal(guarded.held.filter((h) => h.blocks).length, 1);
@@ -117,7 +117,7 @@ describe('tombstone', () => {
   it('show refuses a non-hidden id before appending', async () => {
     const { store, done } = memStore();
     closers.push(done);
-    store.apply(mkEv(1, 't1', 'catatan'));
+    store.apply(mkEv(1, 't1', 'note'));
     let appended = false;
     const hider = {
       append: async (): Promise<LogEvent> => {
@@ -134,12 +134,12 @@ describe('tombstone', () => {
 
   it('hide keeps bytes across reopen and fails fast on unknown targets', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-tomb-k'));
-    const file = join(dir, 'kasir.db');
+    const file = join(dir, 'ledger.db');
     const k = await createKernel({ file });
     closers.push(() => k.close());
-    const a = await k.append({ type: 'catatan', payload: { isi: 'struk-1' } });
-    await k.append({ type: 'catatan', payload: { isi: 'struk-2' } });
-    await hide(k, a.id, { reason: 'wrong nominal input' });
+    const a = await k.append({ type: 'note', payload: { isi: 'struk-1' } });
+    await k.append({ type: 'note', payload: { isi: 'struk-2' } });
+    await hide(k, a.id, { reason: 'wrong amount input' });
     assert.equal(k.health().events, 3);
     // Target line stays in the log; the tombstone parks beside it.
     const kept = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM _events WHERE id = ?`, [a.id]);
@@ -172,7 +172,7 @@ describe('tombstone', () => {
     const kb = await createKernel({ file: join(dir, 'b.db') });
     closers.push(() => ka.close(), () => kb.close());
     const relay = new MemoryRelay();
-    const rec = await ka.append({ type: 'catatan', payload: { isi: 'nota' } });
+    const rec = await ka.append({ type: 'note', payload: { isi: 'nota' } });
     await ka.sync(relay, { ...fast });
     await kb.sync(relay, { ...fast });
     const seen = await kb.query<{ n: number }>(`SELECT COUNT(*) AS n FROM _events WHERE id = ?`, [rec.id]);

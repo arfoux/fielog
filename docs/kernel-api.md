@@ -6,21 +6,21 @@ Kernel, log, and store API reference. Signatures match `src/` exactly.
 
 ```ts
 interface KernelOpts {
-  file: string;              // 'kasir.db' (+ sidecar 'kasir.log' via logPathFor)
+  file: string;              // 'ledger.db' (+ sidecar 'ledger.log' via logPathFor)
   deviceId?: string;
   clock?: () => number;      // ts_device source (display only). Test skew seam
   maxPending?: number;       // outbox cap, default 50_000 (DEFAULT_OUTBOX_CAP)
   privateKeyPem?: string;    // every local append is signed at the source
 }
 createKernel(opts: KernelOpts): Promise<Kernel>;
-logPathFor(file: string): string; // 'kasir.db' -> 'kasir.log'
+logPathFor(file: string): string; // 'ledger.db' -> 'ledger.log'
 ```
 
 ## `Kernel` (`src/kernel.ts:60-83`)
 
 | method | signature | guarantee |
 |---|---|---|
-| append | `append(args: AppendArgs): Promise<LogEvent>` | writes log + fsync, no network. `AppendArgs = { type, payload } \| { type, ...fields, actor? }`. `bayar` needs a positive integer `nominal`; state only `DRAFT`/`IOU_RECORDED` |
+| append | `append(args: AppendArgs): Promise<LogEvent>` | writes log + fsync, no network. `AppendArgs = { type, payload } \| { type, ...fields, actor? }`. `payment` needs a positive integer `amount`; state only `DRAFT`/`IOU_RECORDED` |
 | query | `query<T>(sql: string, params?: SqlParams): Promise<T[]>` | reads local SQLite, no network. Named params may be bare (`{id}` becomes `$id`) |
 | undo | `undo(eventId: string, actor?: string): Promise<LogEvent>` | compensation event `undo.compensate`; history is never deleted; blind (the target may not have arrived — see [contracts](contracts.md)) |
 | settle | `settle(eventId: string, 'settled' \| 'failed' \| 'expired', actor?: string): Promise<LogEvent>` | `payment.settled` / `payment.failed` / `payment.expired` |
@@ -69,7 +69,7 @@ checkAppend(type: string, payload: Record<string, unknown>): void; // fail-fast 
 MoneyState = { DRAFT, IOU_RECORDED, SETTLED_ONLINE, FAILED, EXPIRED };
 ```
 
-Read schema (`bayar`, `stock`, `stock_moves`, `records`, `conflicts`,
+Read schema (`payment`, `stock`, `stock_moves`, `records`, `conflicts`,
 `_events`, `_meta`, `_quarantine`): `src/store.ts:SCHEMA`.
 Honest money: offline = IOU; `SETTLED_ONLINE` only via settle/sync ack.
 

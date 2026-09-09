@@ -1,4 +1,4 @@
-// v0.5-era compat: a hand-written minimal kasir.log (no actor, no
+// v0.5-era compat: a hand-written minimal ledger.log (no actor, no
 // origin_*, no server_time) must open + replay + query on the current
 // kernel, and current writer output must stay in the superset rule
 // (v0.5 fields + known-optional only). See docs/compat.md.
@@ -12,7 +12,7 @@ import { createKernel, type Kernel } from '../src/kernel.ts';
 import { hashFor } from '../src/log.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const FIXTURE = join(here, 'fixtures', 'v05-kasir.log');
+const FIXTURE = join(here, 'fixtures', 'v05-ledger.log');
 
 // Minimal v0.5 field set. Anything beyond this on writer output must be
 // in KNOWN_OPTIONAL (docs/compat.md).
@@ -26,8 +26,8 @@ describe('compat v05 log', () => {
   let k: Kernel;
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'fielog-v05-'));
-    copyFileSync(FIXTURE, join(dir, 'kasir.log'));
-    k = await createKernel({ file: join(dir, 'kasir.db') });
+    copyFileSync(FIXTURE, join(dir, 'ledger.log'));
+    k = await createKernel({ file: join(dir, 'ledger.db') });
   });
   afterAll(() => k?.close());
 
@@ -44,22 +44,22 @@ describe('compat v05 log', () => {
   it('current kernel opens + verifies + replays the v05 log', async () => {
     assert.deepEqual(k.verifyLog(), { ok: true });
     assert.equal(k.health().events, 5);
-    const bayar = await k.query<{ n: number; total: number }>(
-      `SELECT COUNT(*) AS n, SUM(nominal) AS total FROM bayar WHERE voided = 0`,
+    const payment = await k.query<{ n: number; total: number }>(
+      `SELECT COUNT(*) AS n, SUM(amount) AS total FROM payment WHERE voided = 0`,
     );
-    assert.equal(bayar[0].n, 2);
-    assert.equal(bayar[0].total, 40000);
+    assert.equal(payment[0].n, 2);
+    assert.equal(payment[0].total, 40000);
     const stock = await k.query<{ qty: number }>(`SELECT qty FROM stock WHERE item = 'kopi'`);
     assert.equal(stock[0].qty, 97);
   });
 
   it('append continues the v05 chain (seq + prev_hash)', async () => {
     const tip = JSON.parse(readFileSync(FIXTURE, 'utf8').trim().split('\n').at(-1)!).hash;
-    const ev = await k.append({ type: 'bayar', nominal: 5000, oleh: 'agus' });
+    const ev = await k.append({ type: 'payment', amount: 5000, actor: 'agus' });
     assert.equal(ev.seq, 6);
     assert.equal(ev.prev_hash, tip);
     assert.deepEqual(k.verifyLog(), { ok: true });
-    const rows = await k.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
+    const rows = await k.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
     assert.equal(rows[0].total, 45000);
   });
 

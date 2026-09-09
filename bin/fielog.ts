@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
-// bin/fielog.ts — small CLI: serve the ws relay, sync a kernel file, run the 2-phone kasir demo.
+// bin/fielog.ts — small CLI: serve the ws relay, sync a kernel file, run the two-node demo.
 // Bun only. Signed mode by default: serve needs --trust id=pub.pem (repeatable)
 // and sync needs --key priv.pem --as <device>; --unsigned selects the legacy
 // open relay (accepts any device_id, local dev only).
 // examples:
-//   bun bin/fielog.ts serve --port 8091 --file ./relay.log --trust kasir=./kasir.pub
-//   bun bin/fielog.ts sync --file ./kasir.db --relay ws://127.0.0.1:8091 --key ./kasir.priv --as kasir
+//   bun bin/fielog.ts serve --port 8091 --file ./relay.log --trust device-01=./device-01.pub
+//   bun bin/fielog.ts sync --file ./ledger.db --relay ws://127.0.0.1:8091 --key ./device-01.priv --as device-01
 //   bun bin/fielog.ts serve --port 8091 --file ./relay.log --unsigned
 //   bun bin/fielog.ts demo
 import { mkdtempSync, readFileSync, writeSync } from 'node:fs';
@@ -19,10 +19,10 @@ function usage(): string {
     '  serve --port <n> --file <relay.log> --trust <id=pub.pem> [--trust ...]',
     '    run the file-backed ws relay in signed mode (rejects unknown devices)',
     '  serve --port <n> --file <relay.log> --unsigned   open relay (dev only)',
-    '  sync --file <kasir.db> --relay <ws url> --key <priv.pem> --as <device>',
+    '  sync --file <ledger.db> --relay <ws url> --key <priv.pem> --as <device>',
     '    push+pull the kernel delta with a capability token',
-    '  sync --file <kasir.db> --relay <ws url> --unsigned   unsigned (dev only)',
-    '  demo   2-phone kasir: offline sales, then signed-mode sync with matching totals',
+    '  sync --file <ledger.db> --relay <ws url> --unsigned   unsigned (dev only)',
+    '  demo   two-node: offline sales, then signed-mode sync with matching totals',
   ].join('\n');
 }
 
@@ -101,36 +101,36 @@ async function cmdSync(rest: string[]): Promise<void> {
 
 async function cmdDemo(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'fielog-demo-'));
-  const k1 = generateDeviceKey('hp1');
-  const k2 = generateDeviceKey('hp2');
-  const server = new WsRelayServer({ port: 0, file: join(dir, 'relay.log'), trustedDevices: { hp1: k1.publicKeyPem, hp2: k2.publicKeyPem } });
+  const k1 = generateDeviceKey('device-01');
+  const k2 = generateDeviceKey('device-02');
+  const server = new WsRelayServer({ port: 0, file: join(dir, 'relay.log'), trustedDevices: { 'device-01': k1.publicKeyPem, 'device-02': k2.publicKeyPem } });
   const port = await server.start();
-  const hp1 = await createKernel({ file: join(dir, 'hp1.db'), deviceId: 'hp1', privateKeyPem: k1.privateKeyPem });
-  const hp2 = await createKernel({ file: join(dir, 'hp2.db'), deviceId: 'hp2', privateKeyPem: k2.privateKeyPem });
-  const c1 = new WsRelayClient(`ws://127.0.0.1:${port}`, { capToken: hp1.capToken(k1.privateKeyPem) });
-  const c2 = new WsRelayClient(`ws://127.0.0.1:${port}`, { capToken: hp2.capToken(k2.privateKeyPem) });
+  const node1 = await createKernel({ file: join(dir, 'device-01.db'), deviceId: 'device-01', privateKeyPem: k1.privateKeyPem });
+  const node2 = await createKernel({ file: join(dir, 'device-02.db'), deviceId: 'device-02', privateKeyPem: k2.privateKeyPem });
+  const c1 = new WsRelayClient(`ws://127.0.0.1:${port}`, { capToken: node1.capToken(k1.privateKeyPem) });
+  const c2 = new WsRelayClient(`ws://127.0.0.1:${port}`, { capToken: node2.capToken(k2.privateKeyPem) });
   try {
     let expected = 0;
     for (let i = 0; i < 20; i++) {
-      const nominal = 5000 + i * 250;
-      expected += nominal;
-      await hp1.append({ type: 'bayar', nominal, oleh: 'kasir-1' });
+      const amount = 5000 + i * 250;
+      expected += amount;
+      await node1.append({ type: 'payment', amount, actor: 'device-01' });
     }
-    await hp1.sync(c1, { trustedDevices: { hp2: k2.publicKeyPem } });
-    await hp2.sync(c2, { trustedDevices: { hp1: k1.publicKeyPem } });
-    const t1 = await hp1.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
-    const t2 = await hp2.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
-    console.log(`sync: hp1 = ${t1[0].total} | hp2 = ${t2[0].total} | expected = ${expected}`);
+    await node1.sync(c1, { trustedDevices: { 'device-02': k2.publicKeyPem } });
+    await node2.sync(c2, { trustedDevices: { 'device-01': k1.publicKeyPem } });
+    const t1 = await node1.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+    const t2 = await node2.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+    console.log(`sync: device-01 = ${t1[0].total} | device-02 = ${t2[0].total} | expected = ${expected}`);
     if (t1[0].total !== expected || t2[0].total !== expected) {
-      console.error(`totals differ: hp1=${t1[0].total} hp2=${t2[0].total} expected=${expected}`);
+      console.error(`totals differ: device-01=${t1[0].total} device-02=${t2[0].total} expected=${expected}`);
       process.exit(1);
     }
     console.log('match on both sides, totals agree');
   } finally {
     c1.close();
     c2.close();
-    hp1.close();
-    hp2.close();
+    node1.close();
+    node2.close();
     server.kill();
   }
 }

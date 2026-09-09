@@ -1,5 +1,5 @@
 // log.ts — JSONL append-only log: UUID per event, hash chain, fsync per append.
-// Boring file: `tail -f kasir.log` friendly. One JSON object per line.
+// Boring file: `tail -f ledger.log` friendly. One JSON object per line.
 import { createHash, randomUUID } from 'node:crypto';
 import {
   appendFileSync,

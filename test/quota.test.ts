@@ -24,7 +24,7 @@ describe('quota-guard reserve + fail-closed', () => {
 
   it('measures real files and denies the byte past the ceiling', () => {
     const d = dir();
-    const f = join(d, 'kasir.log');
+    const f = join(d, 'ledger.log');
     writeFileSync(f, 'x'.repeat(40));
     const g = openQuotaGuard({ limitBytes: 100, files: [f] });
     assert.equal(g.usage(), 40);
@@ -49,7 +49,7 @@ describe('quota-guard reserve + fail-closed', () => {
 
   it('check catches growth behind the guard back (fail-closed on changed reality)', () => {
     const d = dir();
-    const f = join(d, 'kasir.log');
+    const f = join(d, 'ledger.log');
     writeFileSync(f, 'x'.repeat(10));
     const g = openQuotaGuard({ limitBytes: 100, files: [f] });
     g.reserve(90); // 10 + 90 = 100: admitted

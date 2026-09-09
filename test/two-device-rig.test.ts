@@ -1,4 +1,4 @@
-// two-device-rig.test.ts — kasir-01/kasir-02 rig: three convergence scenarios,
+// two-device-rig.test.ts — device-01/device-02 rig: three convergence scenarios,
 // two devices through one relay (port of skill-11 multi-device-rig).
 // read-only reference: test/two-device.test.js (left untouched).
 import { describe, it, beforeEach, afterEach } from 'bun:test';
@@ -13,20 +13,20 @@ const N = Number(process.env.RIG_N ?? 20);
 
 async function total(k: Kernel): Promise<number> {
   const rows = await k.query<{ total: number }>(
-    `SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`,
+    `SELECT SUM(amount) AS total FROM payment WHERE voided = 0`,
   );
   return rows[0]?.total ?? 0;
 }
 
-describe('two-device rig kasir-01/kasir-02', () => {
+describe('two-device rig device-01/device-02', () => {
   let dir: string;
   let k1: Kernel;
   let k2: Kernel;
   let relay: MemoryRelay;
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'fielog-rig-'));
-    k1 = await createKernel({ file: join(dir, 'kasir-01.db'), deviceId: 'kasir-01' });
-    k2 = await createKernel({ file: join(dir, 'kasir-02.db'), deviceId: 'kasir-02' });
+    k1 = await createKernel({ file: join(dir, 'device-01.db'), deviceId: 'device-01' });
+    k2 = await createKernel({ file: join(dir, 'device-02.db'), deviceId: 'device-02' });
     relay = new MemoryRelay();
   });
   afterEach(() => {
@@ -34,12 +34,12 @@ describe('two-device rig kasir-01/kasir-02', () => {
     k2?.close();
   });
 
-  it('s1: kasir-01 sells offline, kasir-02 pulls until equal', async () => {
+  it('s1: device-01 sells offline, device-02 pulls until equal', async () => {
     let expected = 0;
     for (let i = 0; i < N; i++) {
-      const nominal = 5000 + i * 250;
-      expected += nominal;
-      await k1.append({ type: 'bayar', nominal, oleh: 'kasir-01' });
+      const amount = 5000 + i * 250;
+      expected += amount;
+      await k1.append({ type: 'payment', amount, actor: 'device-01' });
     }
     await k1.sync(relay, { baseMs: 1 });
     const res = await k2.sync(relay, { baseMs: 1 });
@@ -59,13 +59,13 @@ describe('two-device rig kasir-01/kasir-02', () => {
       const b = 3000 + i * 100;
       sum1 += a;
       sum2 += b;
-      await k1.append({ type: 'bayar', nominal: a, oleh: 'kasir-01' });
-      await k2.append({ type: 'bayar', nominal: b, oleh: 'kasir-02' });
+      await k1.append({ type: 'payment', amount: a, actor: 'device-01' });
+      await k2.append({ type: 'payment', amount: b, actor: 'device-02' });
     }
     const want = sum1 + sum2;
     await k1.sync(relay, { baseMs: 1 });
     await k2.sync(relay, { baseMs: 1 });
-    await k1.sync(relay, { baseMs: 1 }); // pull the late-arriving kasir-02 batch
+    await k1.sync(relay, { baseMs: 1 }); // pull the late-arriving device-02 batch
     assert.equal(await total(k1), want);
     assert.equal(await total(k2), want);
     console.log(`[two-device-rig] s2 total=${want} converged=ok`);
@@ -74,9 +74,9 @@ describe('two-device rig kasir-01/kasir-02', () => {
   it('s3: cut mid-run then resume without duplicates', async () => {
     let expected = 0;
     for (let i = 0; i < N; i++) {
-      const nominal = 1000 + i;
-      expected += nominal;
-      await k1.append({ type: 'bayar', nominal, oleh: 'kasir-01' });
+      const amount = 1000 + i;
+      expected += amount;
+      await k1.append({ type: 'payment', amount, actor: 'device-01' });
     }
     relay.failAfterEvents = 7;
     await assert.rejects(k1.sync(relay, { chunkSize: 10, maxRetries: 0, baseMs: 1 }), /mid-batch/);

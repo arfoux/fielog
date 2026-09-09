@@ -18,13 +18,13 @@ describe('poison pull', () => {
   it('skips dead-letters, advances the cursor, keeps syncing', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-poison-'));
     const relay = new MemoryRelay();
-    const good1: LogEvent = { id: 'good-1', seq: 1, type: 'bayar', actor: 'budi', device_id: 'devA', ts_device: 1, payload: { nominal: 1000, oleh: 'budi' }, prev_hash: 'GENESIS', hash: 'h1' };
-    const poison: LogEvent = { id: 'poison-1', seq: 2, type: 'bayar', actor: 'mallory', device_id: 'mallory-dev', ts_device: 2, payload: { nominal: -999 }, prev_hash: 'h1', hash: 'h2' };
+    const good1: LogEvent = { id: 'good-1', seq: 1, type: 'payment', actor: 'budi', device_id: 'devA', ts_device: 1, payload: { amount: 1000, actor: 'budi' }, prev_hash: 'GENESIS', hash: 'h1' };
+    const poison: LogEvent = { id: 'poison-1', seq: 2, type: 'payment', actor: 'mallory', device_id: 'mallory-dev', ts_device: 2, payload: { amount: -999 }, prev_hash: 'h1', hash: 'h2' };
     const untyped: LogEvent = { id: 'untyped-1', seq: 3, type: '', actor: 'mallory', device_id: 'mallory-dev', ts_device: 3, payload: {}, prev_hash: 'h2', hash: 'h3' };
-    const good2: LogEvent = { id: 'good-2', seq: 4, type: 'bayar', actor: 'budi', device_id: 'devA', ts_device: 4, payload: { nominal: 2000, oleh: 'budi' }, prev_hash: 'h3', hash: 'h4' };
+    const good2: LogEvent = { id: 'good-2', seq: 4, type: 'payment', actor: 'budi', device_id: 'devA', ts_device: 4, payload: { amount: 2000, actor: 'budi' }, prev_hash: 'h3', hash: 'h4' };
     await relay.push([good1, poison, untyped, good2]);
 
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     try {
       const res = await k.sync(relay, { chunkSize: 10, ...fast });
       assert.equal(res.pulled, 4);
@@ -35,7 +35,7 @@ describe('poison pull', () => {
       assert.equal(lines.length, 2);
       assert.ok(!readFileSync(k.logPath, 'utf8').includes('poison-1'));
       assert.ok(!readFileSync(k.logPath, 'utf8').includes('untyped-1'));
-      const rows = await k.query<{ event_id: string; nominal: number }>(`SELECT event_id, nominal FROM bayar ORDER BY nominal`);
+      const rows = await k.query<{ event_id: string; amount: number }>(`SELECT event_id, amount FROM payment ORDER BY amount`);
       assert.deepEqual(rows.map((r) => r.event_id), ['good-1', 'good-2']);
 
       // Cursor advanced past the poison: the next sync is a no-op delta,
@@ -47,7 +47,7 @@ describe('poison pull', () => {
       assert.equal(lines2.length, 2);
 
       // Sync keeps working after poison: new valid events still flow.
-      const good3: LogEvent = { id: 'good-3', seq: 5, type: 'bayar', actor: 'budi', device_id: 'devA', ts_device: 5, payload: { nominal: 3000, oleh: 'budi' }, prev_hash: 'h4', hash: 'h5' };
+      const good3: LogEvent = { id: 'good-3', seq: 5, type: 'payment', actor: 'budi', device_id: 'devA', ts_device: 5, payload: { amount: 3000, actor: 'budi' }, prev_hash: 'h4', hash: 'h5' };
       await relay.push([good3]);
       const res3 = await k.sync(relay, { chunkSize: 10, ...fast });
       assert.equal(res3.applied, 1);

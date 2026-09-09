@@ -5,7 +5,7 @@ Honest limits + ways out of common problems. No false promises.
 ## Design limits
 
 - Bun only. `bun:sqlite` + `Bun.serve` do not exist in Node (`docs/install.md`).
-- One process per file. Two writers in different processes on one `kasir.log` /
+- One process per file. Two writers in different processes on one `ledger.log` /
   `cas.json` race last-write-wins (see [cas-store](cas-store.md)).
 - Bounded outbox: default 50_000 unsynced events, past that `append`
   throws `ERR_OUTBOX_FULL` (`maxPending`, `src/kernel.ts`). Sync to
@@ -30,8 +30,8 @@ Honest limits + ways out of common problems. No false promises.
 |---|---|---|
 | `ERR_DEVICE_MISMATCH` on open | explicit `deviceId` differs from the stored explicit id | open with the stored id, or a new file for a new device |
 | `ERR_OUTBOX_FULL` | outbox ≥ cap | `sync`, then append again |
-| `bayar rejected: nominal ...` | nominal is not a positive integer | fix the input; no log line is written (fail-fast) |
-| `bayar rejected: state ...` | state other than `DRAFT`/`IOU_RECORDED` | settlement only via `settle`/online ack |
+| `payment rejected: amount ...` | amount is not a positive integer | fix the input; no log line is written (fail-fast) |
+| `payment rejected: state ...` | state other than `DRAFT`/`IOU_RECORDED` | settlement only via `settle`/online ack |
 | `ERR_UNKNOWN_TARGET` (hide/hold) | mistyped id / target not yet synced | check the id; blind compensators (`undo`/`settle`) need no local target |
 | `ERR_NOT_HIDDEN` (show) | the id is genuinely not hidden | nothing is written; check `hiddenIds` |
 | `serve needs --trust ...` (exit 2) | serve without a registry | add `--trust id=pub.pem` or `--unsigned` (dev) |

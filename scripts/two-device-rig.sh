@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# two-device-rig.sh -- kasir-01/kasir-02 rig: three convergence scenarios
+# two-device-rig.sh -- device-01/device-02 rig: three convergence scenarios
 # over one relay (port of skill-11 multi-device-rig).
 #
 # Scenarios (test/two-device-rig.test.ts):
-#   s1  kasir-01 sells offline, kasir-02 pulls to match + re-sync no-op
+#   s1  device-01 sells offline, device-02 pulls to match + re-sync no-op
 #   s2  two-way offline divergence then converge to the combined total
 #   s3  relay drops mid-batch, resume without duplicates (exact-once by uuid)
 #

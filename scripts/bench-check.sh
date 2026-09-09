@@ -75,7 +75,7 @@ ARCH="$(uname -m 2>/dev/null || echo unknown)"
 
 # corpus pin: fixed workload params per bench (must match bench/*.ts source).
 case "$BENCH" in
-  append) CORPUS="n=$N nominal=1000+(i%9000) oleh=bench" ;;
+  append) CORPUS="n=$N amount=1000+(i%9000) actor=bench" ;;
   query) CORPUS="n=$N iters=200 warmup=10 maxPending=n+1000 workloads=sum_all,point_by_seq" ;;
   sync) CORPUS="n=$N chunk=500 relay=ws-real fast=1/30ms" ;;
 esac

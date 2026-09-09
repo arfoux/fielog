@@ -31,8 +31,8 @@ checkThreshold(registry, ev, signatures, threshold): { valid, thresholdMet };
 
 - No PKI: a device is a raw pubkey. The authority signs scope grants;
   devices self-sign their own capability tokens.
-- Relay scopes (`relay:push` / `relay:pull`) vs kasir scopes
-  (`kasir:append` / `kasir:settle`): different gates
+- Relay scopes (`relay:push` / `relay:pull`) vs payment scopes
+  (`payment:append` / `payment:settle`): different gates
   (`verifyCapToken`/`authorizeCapToken` vs `verifyGrant`/`authorizeGrant`).
 - Token authorize order: device tombstone → per-token-id revocation →
   signature → expiry → scope. A revoked caller never reaches crypto.
@@ -42,5 +42,5 @@ checkThreshold(registry, ev, signatures, threshold): { valid, thresholdMet };
   `WsRelayClient.setCapToken` without redial.
 - A relay enforces only when it knows a device (`enforcing` = non-empty
   registry). An unsigned relay accepts any `device_id` — local dev only.
-- `bayar` with nominal >= limit needs `threshold` distinct countersignatures
+- `payment` with amount >= limit needs `threshold` distinct countersignatures
   (`SyncOpts.highValue`, verified on pull).

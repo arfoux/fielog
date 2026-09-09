@@ -1,6 +1,6 @@
 // corpus-gen: deterministic synthetic corpus for fielog spins.
-// Port of skill-10 (corpus-generator, status SEHAT): seeded mulberry32 emits
-// a fixed op mix (bayar / stock.add / stock.sell / undo.compensate) with
+// Port of skill-10 (corpus-generator, status HEALTHY): seeded mulberry32 emits
+// a fixed op mix (payment / stock.add / stock.sell / undo.compensate) with
 // deterministic ids, so the same (seed, n) always yields byte-identical JSONL.
 // Library (genCorpus/corpusSha/writeCorpus) + CLI (bun scripts/corpus-gen.ts).
 import { createHash } from 'node:crypto';
@@ -25,10 +25,10 @@ export interface CorpusManifest {
   seed: number;
   n: number;
   sha: string;
-  counts: { bayar: number; add: number; sell: number; undo: number };
+  counts: { payment: number; add: number; sell: number; undo: number };
 }
 
-const OLEH = ['kasir-a', 'kasir-b', 'kasir-c'];
+const ACTORS = ['device-a', 'device-b', 'device-c'];
 const ITEMS = ['kopi', 'gula', 'beras'];
 
 /** Pure + deterministic: same (seed, n) -> identical events, no IO, no clock. */
@@ -41,9 +41,9 @@ export function genCorpus(seed: number, n: number): Corpus {
     const id = `corpus-${seed >>> 0}-${i}`;
     const r = rng();
     if (r < 0.5 || known.length === 0) {
-      const nominal = 100 + Math.floor(rng() * 4900);
-      const oleh = pick(OLEH);
-      events.push({ id, type: 'bayar', payload: { nominal, oleh }, actor: oleh });
+      const amount = 100 + Math.floor(rng() * 4900);
+      const actor = pick(ACTORS);
+      events.push({ id, type: 'payment', payload: { amount, actor }, actor });
       known.push(id);
     } else if (r < 0.7) {
       const item = pick(ITEMS);
@@ -53,11 +53,11 @@ export function genCorpus(seed: number, n: number): Corpus {
     } else if (r < 0.85) {
       const item = pick(ITEMS);
       const qty = 1 + Math.floor(rng() * 10);
-      events.push({ id, type: 'stock.sell', payload: { item, qty }, actor: 'kasir-a' });
+      events.push({ id, type: 'stock.sell', payload: { item, qty }, actor: 'device-a' });
       known.push(id);
     } else {
       const reverses = known[Math.floor(rng() * known.length)];
-      events.push({ id, type: 'undo.compensate', payload: { reverses }, actor: 'kasir-a' });
+      events.push({ id, type: 'undo.compensate', payload: { reverses }, actor: 'device-a' });
       known.push(id);
     }
   }
@@ -76,9 +76,9 @@ export function corpusSha(c: Corpus): string {
 }
 
 export function corpusManifest(c: Corpus): CorpusManifest {
-  const counts = { bayar: 0, add: 0, sell: 0, undo: 0 };
+  const counts = { payment: 0, add: 0, sell: 0, undo: 0 };
   for (const e of c.events) {
-    if (e.type === 'bayar') counts.bayar += 1;
+    if (e.type === 'payment') counts.payment += 1;
     else if (e.type === 'stock.add') counts.add += 1;
     else if (e.type === 'stock.sell') counts.sell += 1;
     else counts.undo += 1;
@@ -129,7 +129,7 @@ if (direct) {
   const paths = writeCorpus(c, out);
   console.log(
     `[corpus-gen] seed=${m.seed} n=${m.n} sha=${m.sha.slice(0, 12)} ` +
-      `bayar=${m.counts.bayar} add=${m.counts.add} sell=${m.counts.sell} undo=${m.counts.undo}`,
+      `payment=${m.counts.payment} add=${m.counts.add} sell=${m.counts.sell} undo=${m.counts.undo}`,
   );
   console.log(`[corpus-gen] wrote ${paths.jsonl} + ${paths.manifest}`);
 }

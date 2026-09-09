@@ -14,10 +14,10 @@ describe('sync resume mid-batch', () => {
   let relay;
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'fielog-sync-'));
-    k = await createKernel({ file: join(dir, 'kasir.db') });
+    k = await createKernel({ file: join(dir, 'ledger.db') });
     relay = new MemoryRelay();
     for (let i = 0; i < 20; i++) {
-      await k.append({ type: 'bayar', nominal: 1000 + i, oleh: 'budi' });
+      await k.append({ type: 'payment', amount: 1000 + i, actor: 'budi' });
     }
   });
   afterEach(() => k?.close());

@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalOf, hashFor, isMarker, openLog, type LogEvent } from '../src/log.ts';
 
-const freshPath = (tag: string): string => join(mkdtempSync(join(tmpdir(), `flfix-log-${tag}-`)), 'kasir.log');
+const freshPath = (tag: string): string => join(mkdtempSync(join(tmpdir(), `flfix-log-${tag}-`)), 'ledger.log');
 
 /** Re-anchor an event onto a new prev hash (what a surgical rewrite would do). */
 function rechain(ev: LogEvent, prevHash: string): LogEvent {
@@ -71,7 +71,7 @@ describe('flfix-log: isMarker requires v===1', () => {
   it('a marker line without v is not honored on open', () => {
     const path = freshPath('marker');
     const log = openLog(path, 'devA');
-    log.append({ type: 'catatan', payload: { isi: 'x' } });
+    log.append({ type: 'note', payload: { isi: 'x' } });
     log.close();
     const bogus = JSON.stringify({
       marker: 'fielog-truncate',
@@ -93,9 +93,9 @@ describe('flfix-log: duplicate explicit ids', () => {
   it('append throws on a duplicate explicit id and writes nothing', () => {
     const log = openLog(freshPath('dupe'), 'devA');
     try {
-      log.append({ type: 'catatan', payload: { isi: 'a' }, id: 'dup-id' });
+      log.append({ type: 'note', payload: { isi: 'a' }, id: 'dup-id' });
       assert.throws(
-        () => log.append({ type: 'catatan', payload: { isi: 'b' }, id: 'dup-id' }),
+        () => log.append({ type: 'note', payload: { isi: 'b' }, id: 'dup-id' }),
         /duplicate id/,
       );
       assert.equal(log.readAll().length, 1);
@@ -110,9 +110,9 @@ describe('flfix-log: verify seq continuity', () => {
   it('control: contiguous log still verifies clean', () => {
     const log = openLog(freshPath('control'), 'devA');
     try {
-      log.append({ type: 'catatan', payload: { isi: '1' } });
-      log.append({ type: 'catatan', payload: { isi: '2' } });
-      log.append({ type: 'catatan', payload: { isi: '3' } });
+      log.append({ type: 'note', payload: { isi: '1' } });
+      log.append({ type: 'note', payload: { isi: '2' } });
+      log.append({ type: 'note', payload: { isi: '3' } });
       assert.deepEqual(log.verify(), { ok: true });
     } finally {
       log.close();
@@ -122,9 +122,9 @@ describe('flfix-log: verify seq continuity', () => {
   it('flags a seq skip even when the survivor is re-chained (linkage intact)', () => {
     const path = freshPath('skip');
     const log = openLog(path, 'devA');
-    const e1 = log.append({ type: 'catatan', payload: { isi: 'satu' } });
-    log.append({ type: 'catatan', payload: { isi: 'dua' } });
-    const e3 = log.append({ type: 'catatan', payload: { isi: 'tiga' } });
+    const e1 = log.append({ type: 'note', payload: { isi: 'satu' } });
+    log.append({ type: 'note', payload: { isi: 'dua' } });
+    const e3 = log.append({ type: 'note', payload: { isi: 'tiga' } });
     log.close();
     // Surgical removal: drop seq 2, re-chain seq 3 onto seq 1. prev_hash
     // linkage is perfect, but seqs jump 1 -> 3.
@@ -144,8 +144,8 @@ describe('flfix-log: verify seq continuity', () => {
   it('flags a duplicated seq even when re-chained (linkage intact)', () => {
     const path = freshPath('dupe-seq');
     const log = openLog(path, 'devA');
-    const e1 = log.append({ type: 'catatan', payload: { isi: 'satu' } });
-    const e2 = log.append({ type: 'catatan', payload: { isi: 'dua' } });
+    const e1 = log.append({ type: 'note', payload: { isi: 'satu' } });
+    const e2 = log.append({ type: 'note', payload: { isi: 'dua' } });
     log.close();
     // Forked copy: seq 2 twice, second copy re-chained onto the first.
     const e2b = rechain({ ...e2 }, e2.hash);
@@ -167,9 +167,9 @@ describe('flfix-log: verify seq continuity', () => {
   it('quarantined gap still verifies ok with gaps (known gap, not tamper)', () => {
     const path = freshPath('quar');
     const log = openLog(path, 'devA');
-    log.append({ type: 'catatan', payload: { isi: '1' } });
-    log.append({ type: 'catatan', payload: { isi: '2' } });
-    log.append({ type: 'catatan', payload: { isi: '3' } });
+    log.append({ type: 'note', payload: { isi: '1' } });
+    log.append({ type: 'note', payload: { isi: '2' } });
+    log.append({ type: 'note', payload: { isi: '3' } });
     log.close();
     const raw = readFileSync(path, 'utf8').split('\n');
     raw[1] = '{"nope":';

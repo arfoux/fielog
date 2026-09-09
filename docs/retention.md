@@ -9,7 +9,7 @@ and cutover always writes a new file + atomic rename.
 ```ts
 interface SnapshotResult { snapshot: string; sealedSeq: number; dbSeq: number }
 interface TruncateResult { removed: number; kept: number; sealedSeq: number }
-snapshotPathFor(dbPath: string): string; // 'kasir.db' -> 'kasir.snapshot.db'
+snapshotPathFor(dbPath: string): string; // 'ledger.db' -> 'ledger.snapshot.db'
 takeSnapshot(store, dbPath, sealedSeq, dest?): SnapshotResult;
 // Online full copy (VACUUM INTO) + seal stamp in the snapshot AND live meta.
 clampSealToStored(store, logSeqs, sealed, ackSeq): number;
@@ -27,8 +27,8 @@ After a sweep, incremental replay of the kept suffix + `exciseMissing` with
 ## Usage flow
 
 ```ts
-await k.snapshot();    // seal the acked prefix into kasir.snapshot.db
-await k.truncate();    // sweep the sealed prefix from kasir.log
+await k.snapshot();    // seal the acked prefix into ledger.snapshot.db
+await k.truncate();    // sweep the sealed prefix from ledger.log
 ```
 
 The first line of a swept log = the `fielog-truncate` marker chaining the

@@ -15,10 +15,10 @@ function mkEv(id: string): LogEvent {
   return {
     id,
     seq,
-    type: 'bayar',
-    device_id: 'kasir-test',
+    type: 'payment',
+    device_id: 'device-test',
     ts_device: Date.now(),
-    payload: { nominal: 100 },
+    payload: { amount: 100 },
     prev_hash: 'GENESIS',
     hash: `hash-${id}`,
   };
@@ -94,7 +94,7 @@ describe('flfix-perf-relay', () => {
   });
 
   it('repeated authorize with a stable revoke log scans once', () => {
-    const dev = generateDeviceKey('kasir-a');
+    const dev = generateDeviceKey('device-a');
     const server = new WsRelayServer({
       trustedDevices: { [dev.deviceId]: dev.publicKeyPem },
     });
@@ -124,7 +124,7 @@ describe('flfix-perf-relay', () => {
   });
 
   it('verdict cache invalidates on log mutation and keys on epoch', () => {
-    const dev = generateDeviceKey('kasir-a');
+    const dev = generateDeviceKey('device-a');
     const admin = generateDeviceKey('admin-1');
     const server = new WsRelayServer({
       trustedDevices: { [dev.deviceId]: dev.publicKeyPem },

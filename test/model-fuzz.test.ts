@@ -1,6 +1,6 @@
 // model-fuzz: in-memory oracle vs kernel over 5000 seeded mixed ops.
-// ops (applied identically to both): append bayar, stock.add/sell, undo,
-// kill-respawn, sync, replay. state compared every 100 steps: per-oleh live
+// ops (applied identically to both): append payment, stock.add/sell, undo,
+// kill-respawn, sync, replay. state compared every 100 steps: per-actor live
 // sums + stock qty per item + full voided id set vs SELECT SUM/voided.
 // mismatch fails loudly with seed + step + op log. MemoryRelay only.
 import { describe, it } from 'bun:test';
@@ -12,16 +12,16 @@ import { createKernel, type Kernel } from '../src/kernel.ts';
 import { MemoryRelay } from '../src/sync.ts';
 import { mulberry32 } from '../src/relay.ts';
 
-// oracle: plain-arithmetic mirror of store.ts routing (bayar/stock/undo only).
+// oracle: plain-arithmetic mirror of store.ts routing (payment/stock/undo only).
 class Oracle {
-  pay = new Map<string, number>(); // oleh -> live nominal sum
-  nom = new Map<string, number>(); // bayar id -> nominal
-  who = new Map<string, string>(); // bayar id -> oleh
+  pay = new Map<string, number>(); // actor -> live amount sum
+  nom = new Map<string, number>(); // payment id -> amount
+  who = new Map<string, string>(); // payment id -> actor
   stk = new Map<string, number>(); // item -> qty on hand
   mov = new Map<string, { i: string; q: number }>(); // live stock move -> signed qty
-  void = new Set<string>(); // voided bayar + stock ids (oversell parks included)
+  void = new Set<string>(); // voided payment + stock ids (oversell parks included)
   pend = new Set<string>(); // undo targets not yet seen (records-parked)
-  bayar(id: string, n: number, o: string): void {
+  payment(id: string, n: number, o: string): void {
     this.nom.set(id, n); this.who.set(id, o);
     if (this.pend.has(id)) { this.void.add(id); this.pend.delete(id); return; }
     this.pay.set(o, (this.pay.get(o) ?? 0) + n);
@@ -51,7 +51,7 @@ class Oracle {
 
 const STEPS = 5000;
 const CHECK_EVERY = 100;
-const OLEH = ['kasir-a', 'kasir-b', 'kasir-c'];
+const ACTOR = ['device-a', 'device-b', 'device-c'];
 const ITEMS = ['kopi', 'gula', 'susu'];
 
 function norm(m: Map<string, number>): Map<string, number> {
@@ -62,17 +62,17 @@ function norm(m: Map<string, number>): Map<string, number> {
 
 async function check(seed: number, step: number, op: string, k: Kernel, o: Oracle, log: string[]): Promise<void> {
   const ctx = `seed=${seed} step=${step} op=${op}`;
-  const payRows = await k.query<{ oleh: string; t: number }>(
-    `SELECT oleh, SUM(nominal) AS t FROM bayar WHERE voided = 0 GROUP BY oleh`);
-  const pay = new Map(payRows.map((r) => [String(r.oleh), Number(r.t)] as [string, number]));
+  const payRows = await k.query<{ actor: string; t: number }>(
+    `SELECT actor, SUM(amount) AS t FROM payment WHERE voided = 0 GROUP BY actor`);
+  const pay = new Map(payRows.map((r) => [String(r.actor), Number(r.t)] as [string, number]));
   const stockRows = await k.query<{ item: string; qty: number }>(`SELECT item, qty FROM stock`);
   const stk = new Map(stockRows.map((r) => [String(r.item), Number(r.qty)] as [string, number]));
   const voidRows = await k.query<{ event_id: string }>(
-    `SELECT event_id FROM bayar WHERE voided = 1 UNION ALL SELECT event_id FROM stock_moves WHERE voided = 1`);
+    `SELECT event_id FROM payment WHERE voided = 1 UNION ALL SELECT event_id FROM stock_moves WHERE voided = 1`);
   const tail = log.slice(-80).join('\n');
   const loud = (what: string, exp: unknown, got: unknown) =>
     `${ctx} MISMATCH ${what}\nexpected=${JSON.stringify(exp)}\nactual=${JSON.stringify(got)}\n--- last ops ---\n${tail}`;
-  assert.deepEqual(norm(pay), norm(o.pay), loud('per-oleh balances', [...norm(o.pay)], [...norm(pay)]));
+  assert.deepEqual(norm(pay), norm(o.pay), loud('per-actor balances', [...norm(o.pay)], [...norm(pay)]));
   assert.deepEqual(norm(stk), norm(o.stk), loud('stock balances', [...norm(o.stk)], [...norm(stk)]));
   assert.deepEqual(new Set(voidRows.map((r) => String(r.event_id))), o.void,
     loud('voided ids', [...o.void].sort(), voidRows.map((r) => String(r.event_id)).sort()));
@@ -80,7 +80,7 @@ async function check(seed: number, step: number, op: string, k: Kernel, o: Oracl
 
 async function runFuzz(seed: number): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'fielog-modelfuzz-'));
-  const dbPath = join(dir, 'kasir.db');
+  const dbPath = join(dir, 'ledger.db');
   const relay = new MemoryRelay();
   let k: Kernel = await createKernel({ file: dbPath });
   const o = new Oracle();
@@ -94,12 +94,12 @@ async function runFuzz(seed: number): Promise<void> {
       const r = rng();
       let op = '';
       if (r < 0.4 || known.length === 0) {
-        const nominal = 100 + Math.floor(rng() * 4900);
-        const oleh = pick(OLEH);
-        const ev = await k.append({ type: 'bayar', nominal, oleh });
-        o.bayar(ev.id, nominal, oleh);
+        const amount = 100 + Math.floor(rng() * 4900);
+        const actor = pick(ACTOR);
+        const ev = await k.append({ type: 'payment', amount, actor });
+        o.payment(ev.id, amount, actor);
         known.push(ev.id);
-        op = `bayar ${ev.id} nominal=${nominal} oleh=${oleh}`;
+        op = `payment ${ev.id} amount=${amount} actor=${actor}`;
       } else if (r < 0.52) {
         const item = pick(ITEMS);
         const qty = 1 + Math.floor(rng() * 20);

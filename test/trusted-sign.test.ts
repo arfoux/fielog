@@ -16,8 +16,8 @@ const fast = { baseMs: 1, maxMs: 30 };
 describe('trusted-mode source signing', () => {
   it('signed kernel appends apply under a trusted registry', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-trustedsign-'));
-    const a = generateDeviceKey('kasir-a');
-    const b = generateDeviceKey('kasir-b');
+    const a = generateDeviceKey('device-a');
+    const b = generateDeviceKey('device-b');
     const registry = new Map([
       [a.deviceId, a.publicKeyPem],
       [b.deviceId, b.publicKeyPem],
@@ -25,7 +25,7 @@ describe('trusted-mode source signing', () => {
     const ka = await createKernel({ file: join(dir, 'a.db'), deviceId: a.deviceId, privateKeyPem: a.privateKeyPem });
     const kb = await createKernel({ file: join(dir, 'b.db'), deviceId: b.deviceId, privateKeyPem: b.privateKeyPem });
     try {
-      await ka.append({ type: 'bayar', nominal: 7500, oleh: 'kasir-1' });
+      await ka.append({ type: 'payment', amount: 7500, actor: 'device-1' });
       // Signature is on disk before any sync: the relayed copy is verifiable.
       const line = readFileSync(logPathFor(join(dir, 'a.db')), 'utf8').trim();
       const stored = JSON.parse(line) as { signature?: string };
@@ -37,7 +37,7 @@ describe('trusted-mode source signing', () => {
       const down = await kb.sync(relay, { ...fast, trustedDevices: registry });
       assert.equal(down.pulled, 1);
       assert.equal(down.applied, 1);
-      const rows = await kb.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
+      const rows = await kb.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
       assert.equal(rows[0].total, 7500);
     } finally {
       ka.close();

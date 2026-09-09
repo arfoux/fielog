@@ -15,7 +15,7 @@ Related field skills: 46 (state dir via `$TEMP`, never hardcoded `/tmp`),
    it was measured on (`git rev-parse HEAD`). Re-run after any code
    change; numbers from another commit are stale, not "close enough".
 2. corpus: exact workload. Bench name + N + the fixed workload params
-   in `bench/*.ts` (append: `nominal` 1000..9999, `oleh: bench`;
+   in `bench/*.ts` (append: `amount` 1000..9999, `actor: bench`;
    query: 200 iters, 10 warmup, `maxPending` N+1000; sync: chunk 500,
    real ws relay). Changing N or params = new corpus = new number.
 3. machine: exact machine + runtime. OS, arch, `bun --version` at minimum
@@ -57,12 +57,12 @@ corpus n=2000, via the checker:
 $ bash scripts/bench-check.sh --bench append --n 2000 --run \
     --expect-head d03e683b8e40acf3a484617cdfd42a254a61a358 --expect-bun 1.4.0
 [bench-check] slice head=d03e683b8e40acf3a484617cdfd42a254a61a358 bench_file=bench/bench-append.ts
-[bench-check] corpus n=2000 nominal=1000+(i%9000) oleh=bench
+[bench-check] corpus n=2000 amount=1000+(i%9000) actor=bench
 [bench-check] machine os=MINGW64_NT-10.0-26100 arch=x86_64 bun=1.4.0
 append: n=2000 total_s=20.10 append_per_sec=99
 append per-op ms: p50=9.427 p99=19.211 n=2000
 RESULT {"bench":"append","n":2000,"total_s":20.1017128,"append_per_sec":99.49400928661163,"per_op_ms":{"p50":9.427399999996851,"p99":19.210799999997107,"n":2000}}
-HONESTY: PASS bench=append head=d03e683b8e40acf3a484617cdfd42a254a61a358 bun=1.4.0 corpus="n=2000 nominal=1000+(i%9000) oleh=bench" log=/tmp/bench-check-append-2000.log
+HONESTY: PASS bench=append head=d03e683b8e40acf3a484617cdfd42a254a61a358 bun=1.4.0 corpus="n=2000 amount=1000+(i%9000) actor=bench" log=/tmp/bench-check-append-2000.log
 ```
 
 Checker rejects a wrong slice pin (exit 2, number not quoted):

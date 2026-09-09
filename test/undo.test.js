@@ -11,17 +11,17 @@ describe('undo compensating event', () => {
   let k;
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'fielog-undo-'));
-    k = await createKernel({ file: join(dir, 'kasir.db') });
+    k = await createKernel({ file: join(dir, 'ledger.db') });
   });
   afterEach(() => k?.close());
 
   it('voids a payment without deleting history', async () => {
-    const first = await k.append({ type: 'bayar', nominal: 50000, oleh: 'budi' });
-    await k.append({ type: 'bayar', nominal: 25000, oleh: 'ani' });
+    const first = await k.append({ type: 'payment', amount: 50000, actor: 'budi' });
+    await k.append({ type: 'payment', amount: 25000, actor: 'ani' });
     const undo = await k.undo(first.id, 'budi');
     assert.equal(undo.type, 'undo.compensate');
 
-    const rows = await k.query(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
+    const rows = await k.query(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
     assert.equal(rows[0].total, 25000);
 
     // Original line retained in the log and the store.

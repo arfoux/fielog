@@ -25,16 +25,16 @@ describe('retention', () => {
 
   it('snapshot, truncate, and keep serving + syncing', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-retain-'));
-    const file = join(dir, 'kasir.db');
+    const file = join(dir, 'ledger.db');
     const k = await createKernel({ file });
     closers.push(() => k.close());
     const relay = new MemoryRelay();
 
     let expected = 0;
     for (let i = 0; i < N; i++) {
-      const nominal = 100 + (i % 997);
-      expected += nominal;
-      await k.append({ type: 'bayar', nominal, oleh: 'kasir' });
+      const amount = 100 + (i % 997);
+      expected += amount;
+      await k.append({ type: 'payment', amount, actor: 'device' });
     }
     // Only the acked prefix may be swept: seal it on the relay first.
     const up = await k.sync(relay, { chunkSize: 500, ...fast });
@@ -44,7 +44,7 @@ describe('retention', () => {
     assert.equal(snap.sealedSeq, N);
     assert.equal(snap.dbSeq, N);
     assert.ok(existsSync(snap.snapshot));
-    const snapRows = await k.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
+    const snapRows = await k.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
     assert.equal(snapRows[0].total, expected);
 
     const before = statSync(k.logPath).size;
@@ -57,7 +57,7 @@ describe('retention', () => {
 
     // The db still answers in full after the sweep...
     const rows = await k.query<{ total: number; n: number }>(
-      `SELECT SUM(nominal) AS total, COUNT(*) AS n FROM bayar WHERE voided = 0`,
+      `SELECT SUM(amount) AS total, COUNT(*) AS n FROM payment WHERE voided = 0`,
     );
     assert.equal(rows[0].total, expected);
     assert.equal(rows[0].n, N);
@@ -68,20 +68,20 @@ describe('retention', () => {
     const k2 = await createKernel({ file });
     closers.push(() => k2.close());
     assert.deepEqual(k2.verifyLog(), { ok: true });
-    const rows2 = await k2.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
+    const rows2 = await k2.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
     assert.equal(rows2[0].total, expected);
 
     // ...and sync keeps running: ack cursor survived the sweep.
     assert.equal(k2.ackSeq(), N);
     for (let i = 0; i < 100; i++) {
       expected += 7;
-      await k2.append({ type: 'bayar', nominal: 7, oleh: 'kasir' });
+      await k2.append({ type: 'payment', amount: 7, actor: 'device' });
     }
     const re = await k2.sync(relay, { chunkSize: 50, ...fast });
     assert.equal(re.acked, 100);
     assert.equal(k2.ackSeq(), N + 100);
     assert.equal(relay.size, N + 100);
-    const rows3 = await k2.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
+    const rows3 = await k2.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
     assert.equal(rows3[0].total, expected);
   }, 120_000);
 });

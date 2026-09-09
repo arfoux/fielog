@@ -36,11 +36,11 @@ function logLines(path: string): string[] {
 describe('fielog full journey', () => {
   it('init, 1000 events, crash, undo, failover, revoke, cli demo', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-e2e-'));
-    const dbFile = join(dir, 'kasir.db');
-    const logFile = join(dir, 'kasir.log');
-    const keyA = generateDeviceKey('kasir-a');
-    const keyB = generateDeviceKey('kasir-b');
-    const registry = { 'kasir-a': keyA.publicKeyPem, 'kasir-b': keyB.publicKeyPem };
+    const dbFile = join(dir, 'ledger.db');
+    const logFile = join(dir, 'ledger.log');
+    const keyA = generateDeviceKey('device-a');
+    const keyB = generateDeviceKey('device-b');
+    const registry = { 'device-a': keyA.publicKeyPem, 'device-b': keyB.publicKeyPem };
     const trust = { trustedDevices: registry, ...fast };
     writeFileSync(join(dir, 'a.priv'), keyA.privateKeyPem);
 
@@ -49,7 +49,7 @@ describe('fielog full journey', () => {
     const portA = await serverA.start();
     const portB = await serverB.start();
 
-    let k = await createKernel({ file: dbFile, deviceId: 'kasir-a', privateKeyPem: keyA.privateKeyPem });
+    let k = await createKernel({ file: dbFile, deviceId: 'device-a', privateKeyPem: keyA.privateKeyPem });
     const ca = new WsRelayClient(`ws://127.0.0.1:${portA}`, { ...fast, maxRetries: 5, capToken: k.capToken(keyA.privateKeyPem) });
     const cb = new WsRelayClient(`ws://127.0.0.1:${portB}`, { ...fast, maxRetries: 5, capToken: k.capToken(keyA.privateKeyPem) });
     const closers: Array<() => void> = [() => ca.close(), () => cb.close(), () => k.close(), () => serverA.kill(), () => serverB.kill()];
@@ -75,7 +75,7 @@ describe('fielog full journey', () => {
       proc.kill('SIGKILL');
       await proc.exited;
 
-      k = await createKernel({ file: dbFile, deviceId: 'kasir-a', privateKeyPem: keyA.privateKeyPem });
+      k = await createKernel({ file: dbFile, deviceId: 'device-a', privateKeyPem: keyA.privateKeyPem });
       const durable = k.health().events;
       assert.ok(durable >= 460, `expected durable prefix past the kill point, got ${durable}`);
       const v0 = k.verifyLog() as { ok: boolean; gaps?: number[] };
@@ -95,27 +95,27 @@ describe('fielog full journey', () => {
       assert.equal(k.ackSeq(), 600);
       assert.equal(serverA.size, 600);
 
-      // Phase 3: undo flows — void 25 bayar and 15 stock sells, history stays.
-      const bayarIds = (
-        await k.query<{ event_id: string }>(`SELECT event_id FROM bayar ORDER BY seq`)
+      // Phase 3: undo flows — void 25 payment and 15 stock sells, history stays.
+      const paymentIds = (
+        await k.query<{ event_id: string }>(`SELECT event_id FROM payment ORDER BY seq`)
       ).map((r) => r.event_id);
       const sellIds = (
         await k.query<{ event_id: string }>(`SELECT event_id FROM stock_moves WHERE qty < 0 AND voided = 0 ORDER BY seq`)
       ).map((r) => r.event_id);
-      assert.ok(bayarIds.length > 100 && sellIds.length >= 15);
-      const undoBayar = [8, 38, 68, 98, 128, 158, 188, 218, 248, 278, 308, 338, 368, 398, 428, 458, 488, 518, 548, 568, 578, 588, 594, 597, 599]
-        .map((n) => bayarIds[n % bayarIds.length]);
+      assert.ok(paymentIds.length > 100 && sellIds.length >= 15);
+      const undoPayment = [8, 38, 68, 98, 128, 158, 188, 218, 248, 278, 308, 338, 368, 398, 428, 458, 488, 518, 548, 568, 578, 588, 594, 597, 599]
+        .map((n) => paymentIds[n % paymentIds.length]);
       const undoSell = [3, 11, 19, 27, 35, 43, 51, 59, 67, 75, 83, 91, 99, 107, 115].map((n) => sellIds[n % sellIds.length]);
-      const actors = ['kasir-1', 'kasir-2', 'kasir-3'];
+      const actors = ['device-1', 'device-2', 'device-3'];
       let n = 0;
-      for (const id of [...undoBayar, ...undoSell]) await k.undo(id, actors[n++ % actors.length]);
+      for (const id of [...undoPayment, ...undoSell]) await k.undo(id, actors[n++ % actors.length]);
       assert.equal(k.health().events, 640);
 
-      // Undo intent mirror: voided nominals leave the total, sells come back.
-      let undoneNominal = 0;
-      for (const id of undoBayar) {
-        const rows = await k.query<{ nominal: number }>(`SELECT nominal FROM bayar WHERE event_id = $id`, { id });
-        undoneNominal += rows[0].nominal;
+      // Undo intent mirror: voided amounts leave the total, sells come back.
+      let undoneAmount = 0;
+      for (const id of undoPayment) {
+        const rows = await k.query<{ amount: number }>(`SELECT amount FROM payment WHERE event_id = $id`, { id });
+        undoneAmount += rows[0].amount;
       }
       let restoredStock = 0;
       for (const id of undoSell) {
@@ -130,7 +130,7 @@ describe('fielog full journey', () => {
       // Expected end state from the deterministic intent mirror plus undos.
       const base = mirrorFor([0, 600]);
       const tail = mirrorFor([600, 960]);
-      const expectBayar = base.bayarTotal + tail.bayarTotal - undoneNominal;
+      const expectPayment = base.paymentTotal + tail.paymentTotal - undoneAmount;
       const expectStock: Record<string, number> = {};
       for (const m of [base, tail]) for (const [item, qty] of Object.entries(m.stock)) expectStock[item] = (expectStock[item] ?? 0) + qty;
       expectStock['kopi'] = (expectStock['kopi'] ?? 0) + restoredStock;
@@ -156,8 +156,8 @@ describe('fielog full journey', () => {
       for (const id of union) assert.ok(localIds2.has(id), `lost acked event ${id}`);
 
       // Local totals match the mirror before the revoke probe.
-      const rows = await k.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
-      assert.equal(rows[0].total, expectBayar);
+      const rows = await k.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+      assert.equal(rows[0].total, expectPayment);
       for (const [item, qty] of Object.entries(expectStock)) {
         const srows = await k.query<{ qty: number }>(`SELECT qty FROM stock WHERE item = $item`, { item });
         assert.equal(srows[0]?.qty ?? 0, qty, `stock ${item} mismatch`);
@@ -170,10 +170,10 @@ describe('fielog full journey', () => {
       // Phase 6: capability revoke mid-stream — witness sees the tombstone,
       // the revoked device is rejected, the valid device is unaffected.
       await cb.pull(0); // witness socket is live for the broadcast
-      serverB.revokeDevice('kasir-a');
-      await waitFor(() => cb.revokedNotices.includes('kasir-a'));
-      assert.ok(serverB.isRevoked('kasir-a'));
-      const probe = await k.append({ type: 'bayar', nominal: 777, oleh: 'kasir-1' });
+      serverB.revokeDevice('device-a');
+      await waitFor(() => cb.revokedNotices.includes('device-a'));
+      assert.ok(serverB.isRevoked('device-a'));
+      const probe = await k.append({ type: 'payment', amount: 777, actor: 'device-1' });
       await assert.rejects(k.sync(cb, { ...trust }), /rejected|forbidden|revoked/);
       assert.equal(serverB.size, 400);
 
@@ -182,15 +182,15 @@ describe('fielog full journey', () => {
       closers.push(() => serverA2.kill());
       const portA2 = await serverA2.start();
       assert.equal(serverA2.size, 600);
-      const kb = await createKernel({ file: join(dir, 'b.db'), deviceId: 'kasir-b', privateKeyPem: keyB.privateKeyPem });
+      const kb = await createKernel({ file: join(dir, 'b.db'), deviceId: 'device-b', privateKeyPem: keyB.privateKeyPem });
       closers.push(() => kb.close());
       const ca2 = new WsRelayClient(`ws://127.0.0.1:${portA2}`, { ...fast, maxRetries: 5, capToken: kb.capToken(keyB.privateKeyPem) });
       const cbB = new WsRelayClient(`ws://127.0.0.1:${portB}`, { ...fast, maxRetries: 5, capToken: kb.capToken(keyB.privateKeyPem) });
       closers.push(() => ca2.close(), () => cbB.close());
       const down = await kb.sync([ca2, cbB], { ...trust, chunkSize: 100 });
       assert.equal(down.applied, TOTAL);
-      const kbRows = await kb.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
-      assert.equal(kbRows[0].total, expectBayar); // probe 777 never left the revoked device
+      const kbRows = await kb.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+      assert.equal(kbRows[0].total, expectPayment); // probe 777 never left the revoked device
       for (const [item, qty] of Object.entries(expectStock)) {
         const srows = await kb.query<{ qty: number }>(`SELECT qty FROM stock WHERE item = $item`, { item });
         assert.equal(srows[0]?.qty ?? 0, qty, `peer stock ${item} mismatch`);

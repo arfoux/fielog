@@ -26,10 +26,10 @@ describe('relay failover', () => {
 
   it('primary dies mid-sync: run completes via secondary, exact-once', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-failover-'));
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     closers.push(() => k.close());
     for (let i = 0; i < 20; i++) {
-      await k.append({ type: 'bayar', nominal: 1000 + i, oleh: 'budi' });
+      await k.append({ type: 'payment', amount: 1000 + i, actor: 'budi' });
     }
 
     const primary = new MemoryRelay();
@@ -59,23 +59,23 @@ describe('relay failover', () => {
     assert.equal(secondary.size, 20);
     // Pull rides the secondary too; own echoes apply nothing twice.
     assert.equal(res.applied, 0);
-    const rows = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM bayar WHERE voided = 0`);
+    const rows = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment WHERE voided = 0`);
     assert.equal(rows[0].n, 20);
     // A third device reading the newest relay converges on all 20 events.
     const kc = await createKernel({ file: join(dir, 'c.db') });
     closers.push(() => kc.close());
     const rc = await kc.sync(secondary, { ...fast });
     assert.equal(rc.applied, 20);
-    const rowsC = await kc.query<{ n: number }>(`SELECT COUNT(*) AS n FROM bayar WHERE voided = 0`);
+    const rowsC = await kc.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment WHERE voided = 0`);
     assert.equal(rowsC[0].n, 20);
   });
 
   it('re-probes the healed primary and fails back to list order', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-failback-'));
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     closers.push(() => k.close());
     for (let i = 0; i < 5; i++) {
-      await k.append({ type: 'bayar', nominal: 100 + i, oleh: 'budi' });
+      await k.append({ type: 'payment', amount: 100 + i, actor: 'budi' });
     }
 
     const primary = new MemoryRelay();
@@ -88,7 +88,7 @@ describe('relay failover', () => {
 
     primary.failPushes = 0; // link back up
     for (let i = 0; i < 3; i++) {
-      await k.append({ type: 'bayar', nominal: 200 + i, oleh: 'budi' });
+      await k.append({ type: 'payment', amount: 200 + i, actor: 'budi' });
     }
     // Backoff carries up to ~100ms jitter: let it expire so the re-probe is due.
     {
@@ -104,9 +104,9 @@ describe('relay failover', () => {
 
   it('all relays down rejects without moving the cursor', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-failover-down-'));
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     closers.push(() => k.close());
-    await k.append({ type: 'bayar', nominal: 100, oleh: 'budi' });
+    await k.append({ type: 'payment', amount: 100, actor: 'budi' });
 
     const dead1 = new MemoryRelay();
     const dead2 = new MemoryRelay();
@@ -124,10 +124,10 @@ describe('relay failover', () => {
     const portA = await serverA.start();
     const portB = await serverB.start();
 
-    const k = await createKernel({ file: join(dir, 'kasir.db') });
+    const k = await createKernel({ file: join(dir, 'ledger.db') });
     closers.push(() => k.close());
     for (let i = 0; i < 20; i++) {
-      await k.append({ type: 'bayar', nominal: 500 + i, oleh: 'kasir' });
+      await k.append({ type: 'payment', amount: 500 + i, actor: 'device' });
     }
     const ca = new WsRelayClient(`ws://127.0.0.1:${portA}`, { ...fast, maxRetries: 2 });
     const cb = new WsRelayClient(`ws://127.0.0.1:${portB}`, { ...fast, maxRetries: 2 });

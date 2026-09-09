@@ -45,10 +45,10 @@ function mkEv(id: string): LogEvent {
   return {
     id,
     seq,
-    type: 'bayar',
-    device_id: 'kasir-test',
+    type: 'payment',
+    device_id: 'device-test',
     ts_device: Date.now(),
-    payload: { nominal: 100 },
+    payload: { amount: 100 },
     prev_hash: 'GENESIS',
     hash: `hash-${id}`,
   };
@@ -120,7 +120,7 @@ describe('flfix-relay', () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-flrelay-echo-'));
     const admin = generateDeviceKey('admin-1');
     const admins = { [admin.deviceId]: admin.publicKeyPem };
-    const dev = generateDeviceKey('kasir-a');
+    const dev = generateDeviceKey('device-a');
     const server = openServer({
       file: join(dir, 'relay.log'),
       trustedDevices: { [dev.deviceId]: dev.publicKeyPem },
@@ -133,13 +133,13 @@ describe('flfix-relay', () => {
       revokeAdmins: admins,
     });
 
-    server.issueRevoke(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-1', deviceId: 'kasir-01', epoch: 1 });
+    server.issueRevoke(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-1', deviceId: 'device-01', epoch: 1 });
     const first = await c.syncRevokes();
     assert.equal(first.added, 1);
     assert.equal(first.skipped, 0, 'first handshake must not echo the absorbed server tail');
     assert.deepEqual(c.revokeSnapshot(), server.revokeSnapshot());
 
-    server.issueRevoke(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-2', deviceId: 'kasir-02', epoch: 1 });
+    server.issueRevoke(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-2', deviceId: 'device-02', epoch: 1 });
     const second = await c.syncRevokes();
     assert.equal(second.added, 1);
     assert.equal(second.skipped, 0, 'steady-state handshake re-pushes nothing the relay already stores');
@@ -186,7 +186,7 @@ describe('flfix-relay', () => {
 
   it('gated push with an empty revoke log sorts nothing', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-flrelay-nosort-'));
-    const dev = generateDeviceKey('kasir-a');
+    const dev = generateDeviceKey('device-a');
     const server = openServer({
       file: join(dir, 'relay.log'),
       trustedDevices: { [dev.deviceId]: dev.publicKeyPem },
@@ -215,7 +215,7 @@ describe('flfix-relay', () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-flrelay-rpush-'));
     const admin = generateDeviceKey('admin-1');
     const admins = { [admin.deviceId]: admin.publicKeyPem };
-    const dev = generateDeviceKey('kasir-a');
+    const dev = generateDeviceKey('device-a');
     const server = openServer({
       file: join(dir, 'relay.log'),
       trustedDevices: { [dev.deviceId]: dev.publicKeyPem },
@@ -229,7 +229,7 @@ describe('flfix-relay', () => {
 
     const ev = c.revokes.create(admin.privateKeyPem, admin.deviceId, {
       tokenId: 'tok-fresh',
-      deviceId: 'kasir-09',
+      deviceId: 'device-09',
       epoch: 1,
     });
 

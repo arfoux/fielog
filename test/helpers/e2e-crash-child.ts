@@ -10,7 +10,7 @@ const start = Number(process.argv[3] ?? '400');
 const privFile = process.argv[4] ?? '';
 const max = Number(process.argv[5] ?? '3000');
 const priv = readFileSync(privFile, 'utf8');
-const k = await createKernel({ file: join(dir, 'kasir.db'), deviceId: 'kasir-a', privateKeyPem: priv });
+const k = await createKernel({ file: join(dir, 'ledger.db'), deviceId: 'device-a', privateKeyPem: priv });
 for (let i = start; i < start + max; i++) {
   await k.append(intentFor(i) as never);
 }

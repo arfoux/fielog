@@ -32,8 +32,8 @@ function adminRig(): { admin: ReturnType<typeof generateDeviceKey>; admins: Reco
 async function rig() {
   const dir = mkdtempSync(join(tmpdir(), 'fielog-hsrev-'));
   const { admin, admins } = adminRig();
-  const devA = generateDeviceKey('kasir-a');
-  const devB = generateDeviceKey('kasir-b');
+  const devA = generateDeviceKey('device-a');
+  const devB = generateDeviceKey('device-b');
   const server = new WsRelayServer({
     port: 0,
     file: join(dir, 'relay.log'),
@@ -85,12 +85,12 @@ describe('revoke handshake', () => {
 
   it('divergent replicas converge to byte-equal snapshots with idempotent replay', async () => {
     const { admin, admins, server, url } = await rig();
-    const c = clientFor(url, generateDeviceKey('kasir-a'), admins);
+    const c = clientFor(url, generateDeviceKey('device-a'), admins);
 
     // Divergent writes while the socket is idle: one revoke lands on the
     // relay, one is authored into the client log; neither side sees the other.
-    server.issueRevoke(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-2', deviceId: 'kasir-02', epoch: 1 });
-    c.revokes.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-1', deviceId: 'kasir-01', epoch: 1 });
+    server.issueRevoke(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-2', deviceId: 'device-02', epoch: 1 });
+    c.revokes.create(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-1', deviceId: 'device-01', epoch: 1 });
 
     const first = await c.syncRevokes();
     assert.equal(first.added >= 2, true);
@@ -109,20 +109,20 @@ describe('revoke handshake', () => {
 
   it('forged handshake events are rejected and never stored', async () => {
     const { admin, admins, server, url } = await rig();
-    const c = clientFor(url, generateDeviceKey('kasir-a'), admins);
+    const c = clientFor(url, generateDeviceKey('device-a'), admins);
     const attacker = generateDeviceKey('attacker');
     const base = server.revokeCursor();
 
     // Unknown admin: well-formed and self-signed, but not trusted.
     const stranger = createRevokeEvent(attacker.privateKeyPem, attacker.deviceId, {
       tokenId: 'tok-x',
-      deviceId: 'kasir-01',
+      deviceId: 'device-01',
       epoch: 1,
     });
     // Transplanted signature: valid admin sig over edited content.
     const good = createRevokeEvent(admin.privateKeyPem, admin.deviceId, {
       tokenId: 'tok-y',
-      deviceId: 'kasir-01',
+      deviceId: 'device-01',
       epoch: 1,
     });
     const transplanted = { ...good, epoch: 7 };
@@ -139,7 +139,7 @@ describe('revoke handshake', () => {
     assert.equal(c.revokes.size, 0);
 
     // The channel is not poisoned: a legit revoke still converges after.
-    server.issueRevoke(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-ok', deviceId: 'kasir-01', epoch: 1 });
+    server.issueRevoke(admin.privateKeyPem, admin.deviceId, { tokenId: 'tok-ok', deviceId: 'device-01', epoch: 1 });
     const res = await c.syncRevokes();
     assert.equal(res.rejected, 0);
     assert.deepEqual(c.revokeSnapshot(), server.revokeSnapshot());

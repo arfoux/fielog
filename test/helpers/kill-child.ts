@@ -4,8 +4,8 @@ import { createKernel } from '../../src/kernel.ts';
 
 const dir = process.argv[2] ?? '';
 const total = Number(process.argv[3] ?? '5000');
-const k = await createKernel({ file: dir + '/kasir.db' });
+const k = await createKernel({ file: dir + '/ledger.db' });
 for (let i = 0; i < total; i++) {
-  await k.append({ type: 'bayar', nominal: 100 + (i % 997), oleh: 'kasir' });
+  await k.append({ type: 'payment', amount: 100 + (i % 997), actor: 'device' });
 }
 k.close();

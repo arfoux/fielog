@@ -17,14 +17,14 @@ function seedEvents(store: EventStore, seqs: number[]): void {
   for (const s of seqs) {
     store.exec(
       `INSERT INTO _events(seq,id,type,device_id,ts_device,payload,hash,prev_hash) ` +
-        `VALUES(${s},'id-${s}','bayar','d1',${s},'{}','h${s}','h${s - 1}')`,
+        `VALUES(${s},'id-${s}','payment','d1',${s},'{}','h${s}','h${s - 1}')`,
     );
   }
 }
 
 function freshDb(name: string): { dbPath: string; store: EventStore } {
   const dir = mkdtempSync(join(tmpdir(), `fielog-flfix-retain-${name}-`));
-  const dbPath = join(dir, 'kasir.db');
+  const dbPath = join(dir, 'ledger.db');
   return { dbPath, store: openStore(dbPath) };
 }
 
@@ -50,7 +50,7 @@ describe('flfix-retain', () => {
 
   it('sweep fsyncs the containing directory after the rename', () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-flfix-sweep-'));
-    const logPath = join(dir, 'kasir.log');
+    const logPath = join(dir, 'ledger.log');
     const ev = (seq: number): string => JSON.stringify({ seq, id: `id-${seq}`, hash: `h${seq}` });
     writeFileSync(logPath, [ev(1), ev(2), ev(3)].join('\n') + '\n');
     const syncedDirs: string[] = [];
@@ -69,7 +69,7 @@ describe('flfix-retain', () => {
 
   it('sweep still dir-fsyncs with the default hook (no injection)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-flfix-sweep-default-'));
-    const logPath = join(dir, 'kasir.log');
+    const logPath = join(dir, 'ledger.log');
     const ev = (seq: number): string => JSON.stringify({ seq, id: `id-${seq}`, hash: `h${seq}` });
     writeFileSync(logPath, [ev(1), ev(2)].join('\n') + '\n');
     // Must not throw even where directory fsync is unsupported (Windows):
@@ -99,7 +99,7 @@ describe('flfix-retain', () => {
           return real.query<T>(sql, params);
         },
       };
-      const dest = join(dirname(dbPath), 'kasir.snapshot.db');
+      const dest = join(dirname(dbPath), 'ledger.snapshot.db');
       const res = takeSnapshot(store, dbPath, 2, dest);
       assert.equal(res.sealedSeq, 2);
       assert.equal(res.dbSeq, 3);

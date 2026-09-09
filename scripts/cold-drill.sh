@@ -1,8 +1,8 @@
 #!/bin/sh
-# cold-drill.sh - adapted cold-start drill for fielog (port of skill-8 MANTAP).
+# cold-drill.sh - adapted cold-start drill for fielog (port of skill-8 SOLID).
 #
 # fielog has no cold tier (wave-1 fact), so the drill keeps ONLY the primary
-# log (kasir.log), deletes everything else (sqlite read-model, snapshots,
+# log (ledger.log), deletes everything else (sqlite read-model, snapshots,
 # quarantine), and proves the node rises from the log alone via replay +
 # verify with identical totals.
 #
@@ -48,10 +48,10 @@ cat > "$SEED" <<'EOF'
 const dir = process.env.DRILL_DIR!;
 const n = Number(process.env.DRILL_N!);
 const { createKernel } = await import(process.cwd() + '/src/kernel.ts');
-const k = await createKernel({ file: dir + '/kasir.db', deviceId: 'cold-drill' });
+const k = await createKernel({ file: dir + '/ledger.db', deviceId: 'cold-drill' });
 let expected = 0;
-for (let i = 0; i < n; i++) { expected += 1000 + i; await k.append({ type: 'bayar', nominal: 1000 + i, oleh: 'cold-drill' }); }
-const rows = await k.query<{ total: number }>('SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0');
+for (let i = 0; i < n; i++) { expected += 1000 + i; await k.append({ type: 'payment', amount: 1000 + i, actor: 'cold-drill' }); }
+const rows = await k.query<{ total: number }>('SELECT SUM(amount) AS total FROM payment WHERE voided = 0');
 const v: any = k.verifyLog();
 console.log(`BEFORE events=${k.health().events} total=${rows[0].total} expected=${expected} verify=${v.ok ? 'ok' : 'FAIL'}`);
 const events = k.health().events;
@@ -63,8 +63,8 @@ cat > "$RISE" <<'EOF'
 const dir = process.env.DRILL_DIR!;
 const n = Number(process.env.DRILL_N!);
 const { createKernel } = await import(process.cwd() + '/src/kernel.ts');
-const k = await createKernel({ file: dir + '/kasir.db', deviceId: 'cold-drill' });
-const rows = await k.query<{ total: number }>('SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0');
+const k = await createKernel({ file: dir + '/ledger.db', deviceId: 'cold-drill' });
+const rows = await k.query<{ total: number }>('SELECT SUM(amount) AS total FROM payment WHERE voided = 0');
 const v: any = k.verifyLog();
 let expected = 0;
 for (let i = 0; i < n; i++) expected += 1000 + i;
@@ -79,27 +79,27 @@ log "seed dir=$DIR n=$N"
 DRILL_DIR="$DIR" DRILL_N="$N" bun "$SEED"
 rm -f "$SEED"
 
-LOG="$DIR/kasir.log"
+LOG="$DIR/ledger.log"
 LINES="$(grep -c . "$LOG")"
 BYTES="$(wc -c < "$LOG" | tr -d ' ')"
 log "log lines=$LINES bytes=$BYTES (want lines=$N)"
 [ "$LINES" = "$N" ] || { echo "[cold-drill] DRILL: FAIL (log holds $LINES lines, want $N)" >&2; exit 1; }
 log "before delete: $(ls -A "$DIR" | tr '\n' ' ')"
 
-# Adaptasi: hapus semua KECUALI log primer.
+# Adaptation: delete everything EXCEPT the primary log.
 for f in "$DIR"/*; do
   [ -e "$f" ] || continue
   [ "$f" = "$LOG" ] || rm -rf "$f"
 done
 log "after delete: $(ls -A "$DIR" | tr '\n' ' ')"
-[ "$(ls -A "$DIR")" = "kasir.log" ] || { echo "[cold-drill] DRILL: FAIL (delete left: $(ls -A "$DIR" | tr '\n' ' '))" >&2; exit 1; }
+[ "$(ls -A "$DIR")" = "ledger.log" ] || { echo "[cold-drill] DRILL: FAIL (delete left: $(ls -A "$DIR" | tr '\n' ' '))" >&2; exit 1; }
 
 DRILL_DIR="$DIR" DRILL_N="$N" bun "$RISE"
 RC=$?
 rm -f "$RISE"
 
 if [ "$RC" = "0" ]; then
-  log "DRILL: PASS (n=$N, replay from kasir.log only, totals identical, verify ok)"
+  log "DRILL: PASS (n=$N, replay from ledger.log only, totals identical, verify ok)"
 else
   echo "[cold-drill] DRILL: FAIL (recover mismatch, rc=$RC)" >&2
   exit 1
