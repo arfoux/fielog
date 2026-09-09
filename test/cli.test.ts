@@ -72,9 +72,9 @@ describe('cli', () => {
     let expected = 0;
     const ka = await createKernel({ file: adb });
     for (let i = 0; i < 20; i++) {
-      const nominal = 5000 + i * 250;
-      expected += nominal;
-      await ka.append({ type: 'bayar', nominal, oleh: 'kasir-1' });
+      const amount = 5000 + i * 250;
+      expected += amount;
+      await ka.append({ type: 'payment', amount, actor: 'device-1' });
     }
     ka.close();
 
@@ -88,9 +88,9 @@ describe('cli', () => {
 
     const kb = await createKernel({ file: bdb });
     try {
-      const rows = await kb.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
+      const rows = await kb.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
       assert.equal(rows[0].total, expected);
-      const n = await kb.query<{ n: number }>(`SELECT COUNT(*) AS n FROM bayar WHERE voided = 0`);
+      const n = await kb.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment WHERE voided = 0`);
       assert.equal(n[0].n, 20);
     } finally {
       kb.close();
@@ -113,7 +113,7 @@ describe('cli', () => {
   it('demo exits 0 with matching totals', async () => {
     const r = await runOnce(['demo'], 60_000);
     assert.equal(r.code, 0, `demo failed: ${r.err} ${r.out}`);
-    const m = r.out.match(/hp1 = (\d+) \| hp2 = (\d+)/);
+    const m = r.out.match(/device-01 = (\d+) \| device-02 = (\d+)/);
     assert.ok(m, `demo printed no totals: ${r.out.slice(0, 300)}`);
     assert.equal(m[1], m[2]);
     assert.ok(Number(m[1]) > 0);
