@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Fielog logo — ledger slip with verification stamp">
+  <title>Fielog — offline-first kasir log</title>
+  <!-- Badge: trustworthy ledger block, reads as solid ink square at 32px -->
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="#1E1A16"/>
+  <!-- Paper slip: cream receipt / ledger page, zigzag tear at bottom -->
+  <path d="M72 52 H184 V184 L170 196 L156 184 L142 196 L128 184 L114 196 L100 184 L86 196 L72 184 Z"
+        fill="#F5EFE0"/>
+  <!-- Ledger spine: green binding bar -->
+  <path d="M72 52 H92 V188 L86 196 L72 184 Z" fill="#1E7A4F"/>
+  <!-- Chain-link hint: two interlocked stitch rings on the spine -->
+  <g fill="none" stroke="#F5EFE0" stroke-width="3.5">
+    <circle cx="82" cy="98" r="7"/>
+    <circle cx="82" cy="112" r="7"/>
+  </g>
+  <!-- Ledger rulings: three entries; third broken into hash-link dashes -->
+  <g stroke="#1E7A4F" stroke-width="8" stroke-linecap="round">
+    <line x1="106" y1="92" x2="162" y2="92"/>
+    <line x1="106" y1="114" x2="162" y2="114"/>
+    <line x1="106" y1="136" x2="128" y2="136"/>
+    <line x1="138" y1="136" x2="152" y2="136"/>
+  </g>
+  <!-- Stamp: solid red seal overlapping slip corner, cream check = verified log -->
+  <circle cx="160" cy="162" r="36" fill="#C0392B"/>
+  <circle cx="160" cy="162" r="27" fill="none" stroke="#F5EFE0" stroke-width="2.5" stroke-dasharray="5 4" opacity="0.85"/>
+  <path d="M144 163 L156 175 L179 148" fill="none" stroke="#F5EFE0" stroke-width="10"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

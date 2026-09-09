@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/gifs/logo.svg" alt="fielog logo — ledger slip with verification stamp" width="128">
+</p>
+
 # fielog — Fieldlog
 
 Write anywhere, settle later.
@@ -25,6 +29,15 @@ online. `append`/`query`/`undo` tidak pernah menyentuh jaringan — hanya
 - [quickstart](docs/quickstart.md) — 1 HP offline, 2 HP sync (dev + mode tanda), runnable
 - [cli](docs/cli.md) — `serve` / `sync` / `demo`, tiap flag terverifikasi ke `bin/fielog.ts`
 - Contoh nyata: `demo/kasir-2hp.ts` (`bun run demo`), `example/kasir.mjs` (`bun example/kasir.mjs`)
+
+## Galeri
+
+| | |
+|---|---|
+| <img src="docs/gifs/part1-log.png" alt="hash chain" width="480"><br>hash chain — tiap append tersegel ke entri sebelumnya | <img src="docs/gifs/part2-sync.png" alt="delta sync" width="480"><br>delta sync — hanya selisih yang terbang, lanjut dari ack terakhir |
+| <img src="docs/gifs/part3-relay.png" alt="relay" width="480"><br>relay — HP buta saling titip pesan via server | <img src="docs/gifs/part4-retain.png" alt="snapshot+truncate" width="480"><br>snapshot+truncate — pangkas log tanpa hilang jejak |
+| <img src="docs/gifs/part5-auth.png" alt="capability+revoke" width="480"><br>capability+revoke — token bertanda, cabut tanpa ampun | <img src="docs/gifs/part6-quarantine.png" alt="quarantine" width="480"><br>quarantine — entri rusak dikurung, bukan dibuang diam-diam |
+| <img src="docs/gifs/part7-readmodel.png" alt="read model" width="480"><br>read model — SQLite dibangun ulang dari log | <img src="docs/gifs/part8-tombstone.png" alt="soft delete" width="480"><br>soft delete — hapus = nisan, riwayat tetap utuh |
 
 ## Konsep & arsitektur
 
