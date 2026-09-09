@@ -1,7 +1,7 @@
 {
   "name": "fielog",
-  "version": "0.13.0",
-  "description": "Fieldlog — write anywhere, settle later. Offline-first append-log + SQLite read-model + sync.",
+  "version": "0.14.27",
+  "description": "Fieldlog \u2014 write anywhere, settle later. Offline-first append-log + SQLite read-model + sync.",
   "type": "module",
   "main": "src/index.ts",
   "exports": {
@@ -12,8 +12,7 @@
     "bin",
     "README.md",
     "LICENSE",
-    "CHANGELOG.md",
-    "docs"
+    "CHANGELOG.md"
   ],
   "bin": {
     "fielog": "./bin/fielog.ts"
