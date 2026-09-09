@@ -1,4 +1,4 @@
-# Conformance gate (pra-merge)
+# Conformance gate (pre-merge)
 
 `scripts/conformance-gate.sh` is the pre-merge gate for fielog spins.
 It runs four checks; every check prints `PASS: <name> (<detail>)` or
@@ -34,5 +34,5 @@ FAIL can be simulated on purpose (see below). `GATE_*` env vars do the same.
    `FAIL: tests (bun test 66/0, expected 64/0)`.
 
 Full `bun test` takes ~270 s (model-fuzz oracle + soak dominate), so each
-proof run takes about five minutes. FASE-2 (merge + tag) runs only on
+proof run takes about five minutes. Phase-2 (merge + tag) runs only on
 coordinator inbox instruction, never unilaterally.

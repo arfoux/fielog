@@ -1,7 +1,7 @@
-// compat vectors (SEHAT): cross-version read-write conformance over the
+// compat vectors (healthy set): cross-version read-write conformance over the
 // frozen v0.5 fixtures in test/fixtures/v0.5/. New kernel reads old logs
-// (baca); old readers still verify new tails after stripping known-optional
-// fields (tulis silang). See docs/compat-vectors.md.
+// (read direction); old readers still verify new tails after stripping known-optional
+// fields (cross-write direction). See docs/compat-vectors.md.
 import { describe, it, beforeAll, afterAll } from 'bun:test';
 import assert from 'node:assert/strict';
 import { copyFileSync, mkdtempSync, readFileSync } from 'node:fs';
@@ -36,11 +36,11 @@ const FIXTURES: Fixture[] = [
 
 const rawLines = (f: Fixture): string[] =>
   readFileSync(join(here, 'fixtures', 'v0.5', f.file), 'utf8').trim().split('\n');
-describe('compat vectors SEHAT', () => {
+describe('compat vectors (healthy set)', () => {
   const kernels = new Map<string, Kernel>();
   beforeAll(async () => {
     for (const f of FIXTURES) {
-      const dir = mkdtempSync(join(tmpdir(), 'fielog-sehat-'));
+      const dir = mkdtempSync(join(tmpdir(), 'fielog-healthy-'));
       copyFileSync(join(here, 'fixtures', 'v0.5', f.file), join(dir, 'kasir.log'));
       kernels.set(f.file, await createKernel({ file: join(dir, 'kasir.db') }));
     }
@@ -107,7 +107,7 @@ describe('compat vectors SEHAT', () => {
     for (const f of FIXTURES) {
       const k = kernels.get(f.file)!;
       const tip = JSON.parse(rawLines(f).at(-1)!).hash;
-      const ev = await k.append({ type: 'bayar', nominal: 1000, oleh: 'sehat' });
+      const ev = await k.append({ type: 'bayar', nominal: 1000, oleh: 'healthy' });
       assert.equal(ev.seq, f.events + 1);
       assert.equal(ev.prev_hash, tip);
       assert.deepEqual(k.verifyLog(), { ok: true });

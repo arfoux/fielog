@@ -1,5 +1,5 @@
-// cli lewat child process: serve+sync roundtrip 20 event exact-once,
-// demo keluar 0 dengan total cocok. Bun only.
+// cli via child process: serve+sync roundtrip of 20 events exact-once,
+// demo exits 0 with matching totals. Bun only.
 import { describe, it, afterEach } from 'bun:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
@@ -18,7 +18,7 @@ afterEach(() => {
     try {
       procs.pop()?.kill(9);
     } catch {
-      /* sudah mati */
+      /* already dead */
     }
   }
 });
@@ -32,10 +32,10 @@ async function waitPort(proc: ReturnType<typeof Bun.spawn>, ms = 15000): Promise
     for (;;) {
       const m = buf.match(/port=(\d+)/);
       if (m) return Number(m[1]);
-      if (Date.now() > end) throw new Error(`cli serve tak ready: ${buf.slice(0, 300)}`);
+      if (Date.now() > end) throw new Error(`cli serve not ready: ${buf.slice(0, 300)}`);
       const { done, value } = await reader.read();
       if (value) buf += dec.decode(value, { stream: true });
-      if (done) throw new Error(`cli serve mati sebelum ready: ${buf.slice(0, 300)}`);
+      if (done) throw new Error(`cli serve died before ready: ${buf.slice(0, 300)}`);
     }
   } finally {
     reader.releaseLock();
@@ -79,11 +79,11 @@ describe('cli', () => {
     ka.close();
 
     const up = await runOnce(['sync', '--file', adb, '--relay', url, '--unsigned']);
-    assert.equal(up.code, 0, `sync a gagal: ${up.err} ${up.out}`);
+    assert.equal(up.code, 0, `sync a failed: ${up.err} ${up.out}`);
     assert.match(up.out, /acked=20/);
 
     const down = await runOnce(['sync', '--file', bdb, '--relay', url, '--unsigned']);
-    assert.equal(down.code, 0, `sync b gagal: ${down.err} ${down.out}`);
+    assert.equal(down.code, 0, `sync b failed: ${down.err} ${down.out}`);
     assert.match(down.out, /applied=20/);
 
     const kb = await createKernel({ file: bdb });
@@ -96,7 +96,7 @@ describe('cli', () => {
       kb.close();
     }
 
-    // exact-once: file relay 20 uuid unik, sync ulang idempoten
+    // exact-once: file relay holds 20 unique uuids, re-sync is idempotent
     const ids = readFileSync(relayFile, 'utf8')
       .split('\n')
       .filter((l) => l.trim())
@@ -105,18 +105,18 @@ describe('cli', () => {
     assert.equal(new Set(ids).size, 20);
 
     const again = await runOnce(['sync', '--file', bdb, '--relay', url, '--unsigned']);
-    assert.equal(again.code, 0, `sync ulang gagal: ${again.err}`);
+    assert.equal(again.code, 0, `re-sync failed: ${again.err}`);
     assert.match(again.out, /applied=0/);
     serve.kill(9);
   }, 60_000);
 
-  it('demo keluar 0 dengan total cocok', async () => {
+  it('demo exits 0 with matching totals', async () => {
     const r = await runOnce(['demo'], 60_000);
-    assert.equal(r.code, 0, `demo gagal: ${r.err} ${r.out}`);
+    assert.equal(r.code, 0, `demo failed: ${r.err} ${r.out}`);
     const m = r.out.match(/hp1 = (\d+) \| hp2 = (\d+)/);
-    assert.ok(m, `demo tak cetak total: ${r.out.slice(0, 300)}`);
+    assert.ok(m, `demo printed no totals: ${r.out.slice(0, 300)}`);
     assert.equal(m[1], m[2]);
     assert.ok(Number(m[1]) > 0);
-    assert.match(r.out, /total cocok/);
+    assert.match(r.out, /match on both sides, totals agree/);
   }, 60_000);
 });

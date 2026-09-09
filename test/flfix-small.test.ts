@@ -99,9 +99,9 @@ describe('flfix-small audit suspects', () => {
     // (Check-then-append is documented non-atomic: concurrent writers must
     // serialize hide() behind the kernel append lock. Duplicates are safe —
     // the fold stays hidden — so retry-after-racy-check never corrupts.)
-    await assert.rejects(hide(k, 'tidak-ada'), /ERR_UNKNOWN_TARGET/);
+    await assert.rejects(hide(k, 'no-such-id'), /ERR_UNKNOWN_TARGET/);
     assert.equal(k.health().events, before);
-    await hide(k, a.id, { reason: 'salah input nominal' });
+    await hide(k, a.id, { reason: 'wrong nominal input' });
     await hide(k, a.id, { reason: 'racy retry' });
     const rows = await k.query<{ n: number }>(
       `SELECT COUNT(*) AS n FROM records WHERE type = '${TOMBSTONE_HIDE}'`,

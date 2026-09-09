@@ -207,7 +207,7 @@ describe('fielog full journey', () => {
         demo.exited,
       ]);
       assert.equal(code, 0, `cli demo failed: ${err}`);
-      assert.ok(out.includes('sama dua sisi'), `cli demo totals mismatch: ${out}`);
+      assert.ok(out.includes('match on both sides, totals agree'), `cli demo totals mismatch: ${out}`);
     } finally {
       while (closers.length) {
         try {

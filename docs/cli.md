@@ -4,7 +4,7 @@ Reference for `bin/fielog.ts`. Every flag below is verified against the code —
 anything absent from `usage()` / `arg()` is not documented.
 
 ```
-pakai: fielog <serve|sync|demo> [opsi]
+usage: fielog <serve|sync|demo> [options]
 ```
 
 ## `serve` — run the file-backed ws relay (`cmdServe`)
@@ -16,7 +16,7 @@ pakai: fielog <serve|sync|demo> [opsi]
 | `--trust <id=pub.pem>` | yes, unless `--unsigned` | register a trusted device; repeatable per device; format must be `id=path`, pubkey is read + trimmed, unreadable = `die` exit 2 |
 | `--unsigned` | alternative to `--trust` | legacy open relay: accepts any `device_id`. Local dev only |
 
-Without `--trust` and without `--unsigned` → `die('serve butuh --trust ...')`,
+Without `--trust` and without `--unsigned` → `die('serve needs --trust ...')`,
 exit 2. While running, it prints `fielog relay listening ws://127.0.0.1:<port>
 file=<file>` + `ready port=<port>`; lives until `SIGINT`/`SIGTERM`.
 
@@ -53,8 +53,8 @@ bun bin/fielog.ts sync --file ./kasir.db --relay ws://127.0.0.1:8091 --unsigned 
 
 `bun bin/fielog.ts demo`: 20 offline sales on hp1, two-sided signed-mode sync,
 then proves `hp1 == hp2 == expected`, else exit 1
-(`cmdDemo`). Output: `sync: hp1 = ... | hp2 = ... | mau = ...` and
-`sama dua sisi, total cocok`.
+(`cmdDemo`). Output: `sync: hp1 = ... | hp2 = ... | expected = ...` and
+`match on both sides, totals agree`.
 
 ## exit code
 

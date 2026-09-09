@@ -24,7 +24,7 @@ describe('hash-chain-log', () => {
 
     // (2) Corrupt 1 mid-file line (seq CORRUPT_SEQ).
     const lines = readFileSync(path, 'utf8').split('\n');
-    lines[CORRUPT_SEQ - 1] = '{"type":"catat","n":HANCUR';
+    lines[CORRUPT_SEQ - 1] = '{"type":"catat","n":BROKEN';
     writeFileSync(path, lines.join('\n'));
 
     // (3) Reopen quarantines it; verify re-anchors the survivor.

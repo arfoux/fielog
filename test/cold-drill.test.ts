@@ -35,10 +35,10 @@ describe('cold-drill from primary log only', () => {
       seed.close();
     }
 
-    // Adaptasi: hapus semua KECUALI log primer.
-    // Integration exception (timer rule): windows melepas handle sqlite
-    // sesaat setelah close — penantian nyata pada jam platform, tak bisa
-    // dikontrol dengan fake timer.
+    // Setup: delete everything EXCEPT the primary log.
+    // Integration exception (timer rule): windows releases the sqlite handle
+    // briefly after close — a real wait on the platform clock, impossible
+    // to control with a fake timer.
     const sleep = (ms: number): Promise<void> => {
       const { promise, resolve } = Promise.withResolvers<void>();
       setTimeout(resolve, ms);
@@ -66,7 +66,7 @@ describe('cold-drill from primary log only', () => {
       N,
     );
 
-    // Bangkit dari log saja: replay + verify.
+    // Rise from the log alone: replay + verify.
     const risen = await createKernel({ file, deviceId: 'cold-drill-test' });
     try {
       assert.equal(risen.health().events, N);

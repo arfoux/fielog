@@ -1,7 +1,7 @@
 // Soak-runner: seeded rng drives random append/seal/sync/restart with an
-// invariant check every N steps and at the end. Port of skill-3 (MANTAP).
+// invariant check every N steps and at the end. Port of skill-3 (stable).
 // MemoryRelay only (no sockets) so each seed stays far under 60s.
-// Killer case: tabrakan seal — two snapshots collide on the same ack prefix,
+// Killer case: seal collision — two snapshots collide on the same ack prefix,
 // the seal survives a restart, and truncate sweeps only the sealed prefix,
 // never the unacked suffix.
 import { describe, it } from 'bun:test';
@@ -130,7 +130,7 @@ describe('soak-runner', () => {
     it(`seed ${seed}: append/seal/sync/restart hold invariants`, () => runSoak(seed), 55_000);
   }
 
-  it('tabrakan seal: colliding snapshots sweep only the sealed prefix', async () => {
+  it('seal collision: colliding snapshots sweep only the sealed prefix', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-soak-killer-'));
     const dbPath = join(dir, 'kasir.db');
     const relay = new MemoryRelay();
@@ -178,7 +178,7 @@ describe('soak-runner', () => {
       assert.deepEqual(k.verifyLog(), { ok: true });
       const rows2 = await k.query<{ total: number }>(`SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0`);
       assert.equal(rows2[0].total, expected);
-      console.log('[soak-runner] killer=tabrakan-seal removed=10+3 kept=3+0 suffix_intact=true');
+      console.log('[soak-runner] killer=seal-collision removed=10+3 kept=3+0 suffix_intact=true');
     } finally {
       k.close();
     }

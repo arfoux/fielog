@@ -35,7 +35,7 @@ the rig scenarios live in `test/two-device-rig.test.ts`.
 $ bash scripts/two-device-rig.sh
 two-device-rig: n=20 filter=all
 [two-device-rig] s1 total=147500 n=20 idempotent=ok
-[two-device-rig] s2 total=59000 konvergen=ok
+[two-device-rig] s2 total=59000 converged=ok
 [two-device-rig] s3 total=20190 relay.size=20 resume=ok
 two-device-rig: PASS pass=3 fail=0 n=20
 ```

@@ -1,4 +1,4 @@
-// cas.ts — skill-14 cas-store port (MANTAP) for fielog.
+// cas.ts — skill-14 cas-store port (stable) for fielog.
 //
 // Content-addressed blob store: the sha256 of the bytes IS the key, so the
 // same attachment stored twice costs one blob plus a refcount. Refs are

@@ -3,7 +3,7 @@
 Port of skill-3 (`soak-runner`, status SOLID) to fielog.
 One script drives seeded random interleavings of `append` / `seal`
 (`snapshot` + `truncate`) / `sync` / `restart`, checking invariants every
-N steps and at the end. The killer case is tabrakan seal: colliding
+N steps and at the end. The killer case is seal collision: colliding
 snapshots must sweep only the sealed prefix, never the unacked suffix.
 
 Related field skills: 46 (`portabilitas-watchdog`, state dir via
@@ -23,7 +23,7 @@ scripts/soak-runner.sh [--seed N] [--steps N] [--check-every N]
 | `--seed` | 42 (`$SOAK_SEED`) | rng seed; single seeded run + killer case |
 | `--steps` | 200 (`$SOAK_STEPS`) | random ops per run |
 | `--check-every` | 20 (`$SOAK_CHECK_EVERY`) | invariant check cadence |
-| `--killer-only` | off | run only the tabrakan-seal case |
+| `--killer-only` | off | run only the seal-collision case |
 | `--filter` | - | raw `bun test --test-name-pattern` passthrough |
 
 Without flags the underlying test file runs all fixed seeds
@@ -59,7 +59,7 @@ Seeded `mulberry32` picks one op per step:
    never regresses.
 5. Relay exact-once by UUID.
 
-## killer case: tabrakan seal
+## killer case: seal collision
 
 Two snapshots collide on the same ack prefix (10 synced, 3 appended
 unacked, second `snapshot()` must still seal exactly 10). The seal
@@ -75,14 +75,14 @@ $ bun test test/soak-runner.test.ts
 [soak-runner] seed=7 ops=200 invariant_checks=11 ack=79 sealed=79
 [soak-runner] seed=42 ops=200 invariant_checks=11 ack=86 sealed=86
 [soak-runner] seed=20260905 ops=200 invariant_checks=11 ack=98 sealed=98
-[soak-runner] killer=tabrakan-seal removed=10+3 kept=3+0 suffix_intact=true
+[soak-runner] killer=seal-collision removed=10+3 kept=3+0 suffix_intact=true
  4 pass, 0 fail (18.18s)
 ```
 
 ```text
 $ bash scripts/soak-runner.sh --seed 42
 [soak-runner] seed=42 ops=200 invariant_checks=11 ack=86 sealed=86
-[soak-runner] killer=tabrakan-seal removed=10+3 kept=3+0 suffix_intact=true
+[soak-runner] killer=seal-collision removed=10+3 kept=3+0 suffix_intact=true
 soak-runner: PASS pass=2 fail=0 seed=42 steps=200 check_every=20
 exit=0
 ```

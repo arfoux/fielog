@@ -1,6 +1,6 @@
-// two-device-rig.test.ts — rig kasir-01/kasir-02: tiga skenario konvergensi
-// dua device lewat satu relay (port of skill-11 multi-device-rig).
-// read-only reference: test/two-device.test.js (tidak diubah).
+// two-device-rig.test.ts — kasir-01/kasir-02 rig: three convergence scenarios,
+// two devices through one relay (port of skill-11 multi-device-rig).
+// read-only reference: test/two-device.test.js (left untouched).
 import { describe, it, beforeEach, afterEach } from 'bun:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
@@ -34,7 +34,7 @@ describe('two-device rig kasir-01/kasir-02', () => {
     k2?.close();
   });
 
-  it('s1: kasir-01 jualan offline, kasir-02 tarik sampai sama', async () => {
+  it('s1: kasir-01 sells offline, kasir-02 pulls until equal', async () => {
     let expected = 0;
     for (let i = 0; i < N; i++) {
       const nominal = 5000 + i * 250;
@@ -51,7 +51,7 @@ describe('two-device rig kasir-01/kasir-02', () => {
     console.log(`[two-device-rig] s1 total=${expected} n=${N} idempotent=ok`);
   });
 
-  it('s2: dua arah tabrakan offline lalu konvergen', async () => {
+  it('s2: two-way offline collision then converge', async () => {
     let sum1 = 0;
     let sum2 = 0;
     for (let i = 0; i < 10; i++) {
@@ -65,13 +65,13 @@ describe('two-device rig kasir-01/kasir-02', () => {
     const want = sum1 + sum2;
     await k1.sync(relay, { baseMs: 1 });
     await k2.sync(relay, { baseMs: 1 });
-    await k1.sync(relay, { baseMs: 1 }); // tarik batch kasir-02 yang datang belakangan
+    await k1.sync(relay, { baseMs: 1 }); // pull the late-arriving kasir-02 batch
     assert.equal(await total(k1), want);
     assert.equal(await total(k2), want);
-    console.log(`[two-device-rig] s2 total=${want} konvergen=ok`);
+    console.log(`[two-device-rig] s2 total=${want} converged=ok`);
   });
 
-  it('s3: putus tengah jalan lalu resume tanpa duplikat', async () => {
+  it('s3: cut mid-run then resume without duplicates', async () => {
     let expected = 0;
     for (let i = 0; i < N; i++) {
       const nominal = 1000 + i;
@@ -83,7 +83,7 @@ describe('two-device rig kasir-01/kasir-02', () => {
     relay.failAfterEvents = null;
     const res = await k1.sync(relay, { chunkSize: 10, baseMs: 1 });
     assert.equal(res.acked, N);
-    assert.equal(relay.size, N); // exact-once by uuid walau push diulang
+    assert.equal(relay.size, N); // exact-once by uuid even when push is retried
     await k2.sync(relay, { baseMs: 1 });
     assert.equal(await total(k2), expected);
     console.log(`[two-device-rig] s3 total=${expected} relay.size=${relay.size} resume=ok`);

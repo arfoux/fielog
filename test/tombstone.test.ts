@@ -98,10 +98,10 @@ describe('tombstone', () => {
     store.apply(mkEv(1, 'a', 'catatan'));
     store.apply(mkEv(2, 'b', 'catatan'));
     store.apply(mkEv(3, 'c', 'catatan'));
-    hold(store, 'b', 'audit sengketa kasir-02');
+    hold(store, 'b', 'audit dispute kasir-02');
     assert.equal(isHeld(store, 'b'), true);
     assert.equal(isHeld(store, 'a'), false);
-    assert.deepEqual(holds(store), [{ id: 'b', reason: 'audit sengketa kasir-02', seq: 2 }]);
+    assert.deepEqual(holds(store), [{ id: 'b', reason: 'audit dispute kasir-02', seq: 2 }]);
     const guarded = guardSeal(store, [1, 2, 3], 3, 3);
     assert.equal(guarded.effective, 1);
     assert.equal(guarded.held.filter((h) => h.blocks).length, 1);
@@ -139,7 +139,7 @@ describe('tombstone', () => {
     closers.push(() => k.close());
     const a = await k.append({ type: 'catatan', payload: { isi: 'struk-1' } });
     await k.append({ type: 'catatan', payload: { isi: 'struk-2' } });
-    await hide(k, a.id, { reason: 'salah input nominal' });
+    await hide(k, a.id, { reason: 'wrong nominal input' });
     assert.equal(k.health().events, 3);
     // Target line stays in the log; the tombstone parks beside it.
     const kept = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM _events WHERE id = ?`, [a.id]);
@@ -150,7 +150,7 @@ describe('tombstone', () => {
     assert.ok(hid && typeof hid === 'object' && 'hides' in hid);
     assert.equal(hid.hides, a.id);
     const before = k.health().events;
-    await assert.rejects(hide(k, 'tidak-ada'), /ERR_UNKNOWN_TARGET/);
+    await assert.rejects(hide(k, 'no-such-id'), /ERR_UNKNOWN_TARGET/);
     assert.equal(k.health().events, before);
 
     k.close();

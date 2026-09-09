@@ -20,7 +20,7 @@ afterEach(() => {
     try {
       procs.pop()?.kill(9);
     } catch {
-      /* sudah mati */
+      /* already dead */
     }
   }
 });
@@ -37,7 +37,7 @@ async function waitPort(proc: ReturnType<typeof Bun.spawn>, ms = 15000): Promise
       if (Date.now() > end) throw new Error(`cli serve tak ready: ${buf.slice(0, 300)}`);
       const { done, value } = await reader.read();
       if (value) buf += dec.decode(value, { stream: true });
-      if (done) throw new Error(`cli serve mati sebelum ready: ${buf.slice(0, 300)}`);
+      if (done) throw new Error(`cli serve died before ready: ${buf.slice(0, 300)}`);
     }
   } finally {
     reader.releaseLock();
@@ -73,10 +73,10 @@ describe('cli signed surface', () => {
   it('forged device_id push rejected, valid device syncs', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-cliauth-'));
     const victim = generateDeviceKey('kasir');
-    const attacker = generateDeviceKey('penyerang');
+    const attacker = generateDeviceKey('attacker');
     const victimPub = join(dir, 'kasir.pub');
     const victimPriv = join(dir, 'kasir.priv');
-    const attackerPriv = join(dir, 'penyerang.priv');
+    const attackerPriv = join(dir, 'attacker.priv');
     writeFileSync(victimPub, victim.publicKeyPem);
     writeFileSync(victimPriv, victim.privateKeyPem);
     writeFileSync(attackerPriv, attacker.privateKeyPem);
@@ -100,17 +100,17 @@ k.close();
     `], { stdout: 'pipe', stderr: 'pipe' });
     procs.push(prep);
     const prepErr = await new Response(prep.stderr).text();
-    assert.equal(await prep.exited, 0, `prep gagal: ${prepErr}`);
+    assert.equal(await prep.exited, 0, `prep failed: ${prepErr}`);
 
     // Attacker key claiming the victim device id: relay must reject.
     const forged = await runOnce(['sync', '--file', adb, '--relay', url, '--key', attackerPriv, '--as', 'kasir']);
-    assert.notEqual(forged.code, 0, `forged push lolos: ${forged.out} ${forged.err}`);
+    assert.notEqual(forged.code, 0, `forged push got through: ${forged.out} ${forged.err}`);
     assert.match(`${forged.out} ${forged.err}`, /rejected|forbidden/);
-    assert.equal(readFileSync(relayFile, 'utf8').trim(), '', 'relay menyimpan event palsu');
+    assert.equal(readFileSync(relayFile, 'utf8').trim(), '', 'relay stored a forged event');
 
     // Victim key for its own id: accepted.
     const legit = await runOnce(['sync', '--file', adb, '--relay', url, '--key', victimPriv, '--as', 'kasir']);
-    assert.equal(legit.code, 0, `sync sah gagal: ${legit.err} ${legit.out}`);
+    assert.equal(legit.code, 0, `valid sync failed: ${legit.err} ${legit.out}`);
     assert.match(legit.out, /acked=1/);
     serve.kill(9);
   }, 60_000);

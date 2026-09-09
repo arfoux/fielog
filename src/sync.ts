@@ -223,7 +223,7 @@ function verifyPullAuth(remote: LogEvent, registry: Map<string, string> | null, 
   }
   return true;
 }
-// Revoke quarantine + retroactive purge (tutup bocor 3).
+// Revoke quarantine + retroactive purge (closes leak 3).
 //
 // Philosophy: quarantine closes ACCESS and keeps EVIDENCE — it never rewrites
 // or deletes the append-only log. A revoked pull event is recorded verbatim in

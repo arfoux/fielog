@@ -1,6 +1,6 @@
 # hash-chain-log
 
-Skill-12 (MANTAP) port: append-only log where every event commits to its
+Skill-12 (SOLID) port: append-only log where every event commits to its
 predecessor. One corrupt line quarantines; the survivor re-anchors; the
 chain stays verifiable.
 

@@ -1,10 +1,10 @@
-# compat vectors (SEHAT): cross-version read-write conformance
+# compat vectors (HEALTHY): cross-version read-write conformance
 
 `test/compat-vectors.test.ts` pins five conformance vectors over the frozen
 v0.5 fixtures in `test/fixtures/v0.5/` (`kasir-minimal.log`, 5 events;
 `kasir-actor.log`, 4 events with the null-tolerant `actor` optional).
-New kernel must read old logs (baca) and old readers must still verify new
-tails after stripping known-optional fields (tulis silang). Superset rule:
+New kernel must read old logs (read) and old readers must still verify new
+tails after stripping known-optional fields (cross-write). Superset rule:
 see `docs/compat.md` (`canonicalOf` in `src/log.ts` is the frozen hashed list).
 
 | vector | name | check |

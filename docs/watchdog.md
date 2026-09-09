@@ -43,7 +43,7 @@ or `open` (any other status). First match wins:
 1. `failed` non-empty -> `WAKE-COORDINATOR reason=escalation`, exit 3.
    A worker reporting failure needs coordinator eyes now, not at deadline.
 2. all watched tasks `done` -> `WAKE-COORDINATOR reason=worker_done`, exit 0.
-   Wave is finished; coordinator proceeds to merge + tag (fase-2).
+   Wave is finished; coordinator proceeds to merge + tag (Phase-2).
 3. elapsed >= `--timeout` -> `WAKE-COORDINATOR reason=timeout`, exit 2.
    Lists the still-open `id(status)` pairs so the coordinator knows who
    to check (`worker-read`, re-dispatch, or stand down).

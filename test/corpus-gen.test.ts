@@ -1,6 +1,6 @@
 // corpus-gen test: determinism (same seed = byte-identical corpus) +
 // replay (corpus replays through the kernel with verifyLog clean and the
-// read-model matching the shared Oracle). Port of skill-10 (SEHAT).
+// read-model matching the shared Oracle). Port of skill-10 (healthy set).
 import { describe, it } from 'bun:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';

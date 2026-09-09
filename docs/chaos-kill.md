@@ -1,14 +1,14 @@
 # chaos-kill drill
 
-Port of skill-2 (`chaos-kill`, status MANTAP) to fielog. Real `SIGKILL`
+Port of skill-2 (`chaos-kill`, status SOLID) to fielog. Real `SIGKILL`
 at three points — write, seal, sync — then reopen, verify, continue.
 No mocks: a child process dies mid-operation and the parent proves
 the durable prefix survives.
 
 Skill-text note: the skill body is not present in this worktree
-(`grep -r MANTAP` hits only `docs/watchdog.md`, the skill-24 port),
-so the dispatch task block is the spec: SIGKILL at X (tulis, seal,
-sync) plus recovery proof (reopen + verify + lanjut). Minimal
+(`grep -r SOLID` hits only `docs/watchdog.md`, the skill-24 port),
+so the dispatch task block is the spec: SIGKILL at X (write, seal,
+sync) plus recovery proof (reopen + verify + continue). Minimal
 adaptation, no invented skill content.
 
 Related: `test/kill9.test.ts` (reference, read-only — kill mid-append);
@@ -78,5 +78,5 @@ Base-green 66/0 confirmed; the 1 fail does not reproduce.
   fsync), not by exhaustive timing.
 - The seal case waits for the first marker before killing, so it
   proves "kill after a seal", not "kill inside the rename syscall".
-- Fase-2 (merge + tag) is never done here; this worker only commits
+- Phase-2 (merge + tag) is never done here; this worker only commits
   on its own branch.

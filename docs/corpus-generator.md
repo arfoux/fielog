@@ -1,6 +1,6 @@
 # corpus generator
 
-Port of skill-10 (`corpus-generator`, status SEHAT) to fielog.
+Port of skill-10 (`corpus-generator`, status HEALTHY) to fielog.
 One seeded function emits a fixed op mix — `bayar` / `stock.add` /
 `stock.sell` / `undo.compensate` — with deterministic ids, so the same
 `(seed, n)` always yields byte-identical JSONL. The corpus feeds soak,

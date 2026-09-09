@@ -1,6 +1,6 @@
 # cas-store
 
-Skill-14 (MANTAP) port: content-addressed blob store for attachments
+Skill-14 (SOLID) port: content-addressed blob store for attachments
 (receipt photos, note bodies). The sha256 of the bytes IS the key, so
 identical bytes stored twice cost one blob plus a refcount. Refs are
 explicit; the blob dies at zero; reads re-hash and quarantine on

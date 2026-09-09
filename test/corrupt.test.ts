@@ -23,7 +23,7 @@ describe('corrupt line quarantine', () => {
 
     // Bitrot line 5 (seq 5).
     const lines = readFileSync(logPath, 'utf8').split('\n');
-    lines[4] = '{"type":"bayar","nominal":HANCUR';
+    lines[4] = '{"type":"bayar","nominal":BROKEN';
     writeFileSync(logPath, lines.join('\n'));
 
     const k2 = await createKernel({ file }); // must not throw
