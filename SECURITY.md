@@ -1,41 +1,41 @@
 # Security Policy
 
-## Melapor
+## Reporting
 
-Temukan celah? Jangan buka issue publik dulu. Kirim deskripsi + langkah
-repro ke maintainer repo ini lewat DM/kontak yang tercantum di profil repo
-atau commit terbaru. Belum ada alamat security khusus — kontak maintainer
-langsung adalah kanal resmi.
+Found a hole? Do not open a public issue yet. Send a description + repro
+steps to this repo's maintainer via DM/contact listed on the repo profile
+or the latest commit. There is no dedicated security address yet — contacting
+the maintainer directly is the official channel.
 
-Sertakan: versi (`package.json`), file/line yang terdampak, dampak
-(apa yang bisa dilakukan penyerang), dan PoC minimal bila ada.
+Include: version (`package.json`), affected file/line, impact
+(what an attacker could do), and a minimal PoC if you have one.
 
 ## Scope
 
-Dalam scope: `src/` (log chain, store apply, sync verify, relay authorize,
+In scope: `src/` (log chain, store apply, sync verify, relay authorize,
 auth, retain clamp, tombstone guard, cas re-hash, quota fail-closed),
-`bin/fielog.ts` (mode tanda default), `demo/` + `example/` sebagai pola
-yang dicopy pengguna.
+`bin/fielog.ts` (signed mode by default), `demo/` + `example/` as patterns
+copied by users.
 
-Di luar scope: hardening deployment milik pengguna (TLS terminasi, firewall,
-manajemen kunci produksi), dan relay `--unsigned` yang disengaja terbuka
-(sudah didokumentasikan dev-only di [docs/cli](docs/cli.md)).
+Out of scope: hardening of users' own deployments (terminating TLS, firewall,
+production key management), and the intentionally open `--unsigned` relay
+(already documented as dev-only in [docs/cli](docs/cli.md)).
 
-## SLA respon
+## Response SLA
 
-Repo solo/small-team — jujur, bukan janji enterprise:
+Solo/small-team repo — honest, not enterprise promises:
 
-- Konfirmasi diterima: <= 72 jam.
-- Penilaian + rencana fix: <= 7 hari untuk yang berdampak.
-- Perbaikan: prioritas di atas fitur; dirilis + dicatat di CHANGELOG.
-- Bila belum ada kabar dalam 14 hari, ping ulang sekali — lalu boleh
-  full-disclosure bertanggung jawab.
+- Receipt confirmed: <= 72 hours.
+- Triage + fix plan: <= 7 days for impactful ones.
+- Fixes: priority over features; released + noted in CHANGELOG.
+- If there is no news within 14 days, ping once more — then responsible
+  full disclosure is fair.
 
-## Yang sudah dijepit
+## Already pinned
 
-Threat model hidup di `docs/`: token ([capability-token](docs/capability-token.md)),
-revoke ([revoke-handshake](docs/revoke-handshake.md),
-[revoke-event-log](docs/revoke-event-log.md)), karantina
-([quarantine](docs/quarantine.md)), kontrak anti-hilang-data
-([contracts](docs/contracts.md)). PR keamanan sebaiknya menambah test yang
-menjepit celahnya, bukan hanya tambalan.
+The living threat model is in `docs/`: tokens ([capability-token](docs/capability-token.md)),
+revocation ([revoke-handshake](docs/revoke-handshake.md),
+[revoke-event-log](docs/revoke-event-log.md)), quarantine
+([quarantine](docs/quarantine.md)), anti-data-loss contracts
+([contracts](docs/contracts.md)). Security PRs should add a test that
+pins the hole, not just a patch.

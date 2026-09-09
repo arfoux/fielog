@@ -1,6 +1,6 @@
 # soak runner
 
-Port of skill-3 (`soak-runner`, status MANTAP) to fielog.
+Port of skill-3 (`soak-runner`, status SOLID) to fielog.
 One script drives seeded random interleavings of `append` / `seal`
 (`snapshot` + `truncate`) / `sync` / `restart`, checking invariants every
 N steps and at the end. The killer case is tabrakan seal: colliding
@@ -68,7 +68,7 @@ survives a close + reopen, then `truncate()` must report
 totals and `verifyLog` clean. Draining the suffix, sealing at 13, and
 sweeping again yields `{ removed: 3, kept: 0, sealedSeq: 13 }`.
 
-## bukti run (2026-09-06, base 0bb7803 = v0.14.6)
+## Run evidence (2026-09-06, base 0bb7803 = v0.14.6)
 
 ```text
 $ bun test test/soak-runner.test.ts
@@ -97,5 +97,5 @@ fully drained log.
   sockets (those live in `soak.test.ts`, `stress-10.test.ts`).
 - No `undo` op: the model tracks a grow-only live set; compensation
   paths are covered by `soak.test.ts`.
-- Fase-2 (merge + tag) is never done by this script; the coordinator
+- Phase-2 (merge + tag) is never done by this script; the coordinator
   acts via its own inbox.

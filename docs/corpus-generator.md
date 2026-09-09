@@ -57,7 +57,7 @@ kernel ids; undo targets resolve through the same map.
 - Test pins it: same seed twice = `deepEqual` + equal sha; seed 42 vs
   43 diverge; seed normalizes to uint32.
 
-## bukti run (2026-09-06, base d03e683 = v0.14.13)
+## Run evidence (2026-09-06, base d03e683 = v0.14.13)
 
 ```text
 $ bun test test/corpus-gen.test.ts
@@ -81,5 +81,5 @@ Replay (in-test, 200 events through `createKernel` + shared `Oracle` +
   (those live in `soak-runner`), no multi-writer conflicts.
 - No `settle`/`payment.*` ops: money-state transitions are covered by
   `model-oracle` / `model-fuzz`.
-- Fase-2 (merge + tag) is never done by this script; the coordinator
+- Phase-2 (merge + tag) is never done by this script; the coordinator
   acts via its own inbox.

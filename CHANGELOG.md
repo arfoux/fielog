@@ -6,19 +6,19 @@ Untagged commits are folded into the next tag that shipped them.
 
 ## v0.14.27 — audit + perf waves, docs, gallery
 
-- Docs: README jadi pintu + indeks; isi per topik satu-concern (install,
+- Docs: README is now the entry point + index; one concern per topic page (install,
   quickstart, architecture, kernel-api, sync-protocol, relay, retention,
-  auth, contracts, cli, limits-troubleshooting), tabel API terverifikasi ke `src/`.
-- Baru: `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md` (solo/small-team).
+  auth, contracts, cli, limits-troubleshooting), API tables verified against `src/`.
+- New: `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md` (solo/small-team).
 - Bench smoke 2026-09-09 `bun bench/bench-append.ts 200` = 306
-  append/detik, p50 3.07 ms, p99 7.63 ms; angka penuh di `docs/bench.md`.
+  appends/sec, p50 3.07 ms, p99 7.63 ms; full numbers in `docs/bench.md`.
 - Typecheck clean: `PushResult` exported, relay rng field, cas writeSync narrowing.
 - 30 audit suspects fixed: relay fail-closed persist (no ack for unwritten events, ack only stored ids), store seq-vs-id collision no longer swallowed, fractional nominal rejected, sync dead-letter cursors (one poison event never pins push/pull), retain empty-guard returns 0, revokelog convergent tie-break, tombstone guard covers show/target, quota remaining clamped, canonical payload key order, duplicate-id append rejected, seq-gap verification, device mismatch throws (first-explicit adoption allowed), threshold misconfig throws, cas orphan sweep + EEXIST tolerance + fstat + guarded quarantine, deltasync real dead-letter list + honest fetched metric.
 - Kernel split healing is O(1) steady-state (suspect flag + open-time replay); undo/settle stay blind compensators (peer targets may sync later — model-oracle pins this).
 - Perf: relay liveBuf dedupes via persistent Set, token verdicts cached per revoke size; `purgeRevoked` incremental via `sync.purge_seq` cursor + fingerprint; backoff jitter deterministic by default (opt-in random).
 - Suite: 218 tests green, tsc clean.
 
-- Galeri: 8 APNG explainer + logo di README (docs/gifs/, luar tarball).
+- Gallery: 8 APNG explainers + logo in README (docs/gifs/, outside the tarball).
 ## v0.1.0 — offline kernel
 
 - Initial release: offline-first `createKernel({ file })` with `append` / `query` / `undo`, no network needed for local writes.

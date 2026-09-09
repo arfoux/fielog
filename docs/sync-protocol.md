@@ -1,10 +1,10 @@
 # sync-protocol
 
-Delta push/pull per `seq` dengan cursor ack (`src/sync.ts`), plus sync
-manifest-first antar replika (`src/deltasync.ts`, pendalaman
+Delta push/pull per `seq` with ack cursors (`src/sync.ts`), plus
+manifest-first sync between replicas (`src/deltasync.ts`, deep dive
 [delta-sync](delta-sync.md)).
 
-## `Relay` + hasil (`src/sync.ts:8-16,506-543`)
+## `Relay` + results (`src/sync.ts:8-16,506-543`)
 
 ```ts
 interface Relay {
@@ -15,30 +15,30 @@ interface PushResult { pushed: number; acked: number; serverTime: number | null 
 interface PullResult { pulled: number; applied: number; quarantined: number }
 ```
 
-| fungsi | tanda tangan | janji |
+| function | signature | guarantee |
 |---|---|---|
-| `pushPending` | `(log, store, relay, opts?): Promise<PushResult>` | dorong `seq > ack cursor` per chunk; cursor persist per chunk; berhenti di ack parsial, lanjut run berikut |
-| `pullRemote` | `(log, store, relay, deviceId, opts?): Promise<PullResult>` | tarik, terapkan idempoten per UUID di bawah seq lokal baru; pemalsu/poison/co-revoke masuk karantina, cursor tetap maju; sapu retroaktif revoke bila ada sinyal |
-| `syncKernel` | `(log, store, relay, deviceId, opts?): Promise<PushResult & PullResult>` | push lalu pull |
-| `syncWithFailover` | `(log, store, relays, deviceId, opts?, state?): Promise<FailoverResult>` | coba relay sesuai urutan list per chunk, stick ke yang sehat pertama; gagal = cooldown backoff + re-probe; urutan list menentukan fail-back |
-| `withBackoff` | `(fn, opts?): Promise<T>` | retry backoff eksponensial; berhenti untuk error permanen (`isPermanentSyncError`: forbidden / bad cursor / capability / revok / unknown device / unauthorized) |
-| `backoffMs` | `(attempt, baseMs = 200, maxMs = 30_000, jitter?): number` | `baseMs * 2^attempt` cap `maxMs` + jitter. Default deterministik (`((attempt+1)*37) % 100`) |
-| `createFailoverState` | `(n: number): FailoverState` | memori failover antar panggilan sync kernel |
-| `getAckSeq` / `getServerTime` | `(store): number` / `(store): number \| null` | cursor ack lokal (`sync.ack_seq`) / waktu otoritatif (`sync.server_time`) |
-| `MemoryRelay` | `class MemoryRelay implements Relay` | relay in-memory untuk test/dev lokal (~50 baris) |
-| `purgeRevoked` | `(log, store, opts?): PurgeResult` | sapu retroaktif event terevoke dari view baca; baris log + `_events` tetap (forensik). Inkremental via cursor `sync.purge_seq` + fingerprint |
-| `getPurgeSeq` | `(store): number` | seq terakhir yang disapu |
+| `pushPending` | `(log, store, relay, opts?): Promise<PushResult>` | pushes `seq > ack cursor` per chunk; cursor persists per chunk; halts on partial ack, resumes next run |
+| `pullRemote` | `(log, store, relay, deviceId, opts?): Promise<PullResult>` | pulls, applies idempotently per UUID under the new local seq; forged/poison/co-revoked events enter quarantine, cursor still advances; retroactive revoke sweep on signal |
+| `syncKernel` | `(log, store, relay, deviceId, opts?): Promise<PushResult & PullResult>` | push then pull |
+| `syncWithFailover` | `(log, store, relays, deviceId, opts?, state?): Promise<FailoverResult>` | tries relays in list order per chunk, sticks to the first healthy one; failure = backoff cooldown + re-probe; list order decides fail-back |
+| `withBackoff` | `(fn, opts?): Promise<T>` | exponential-backoff retry; stops on permanent errors (`isPermanentSyncError`: forbidden / bad cursor / capability / revok / unknown device / unauthorized) |
+| `backoffMs` | `(attempt, baseMs = 200, maxMs = 30_000, jitter?): number` | `baseMs * 2^attempt` capped at `maxMs` + jitter. Default deterministic (`((attempt+1)*37) % 100`) |
+| `createFailoverState` | `(n: number): FailoverState` | failover memory across kernel sync calls |
+| `getAckSeq` / `getServerTime` | `(store): number` / `(store): number \| null` | local ack cursor (`sync.ack_seq`) / authoritative time (`sync.server_time`) |
+| `MemoryRelay` | `class MemoryRelay implements Relay` | in-memory relay for local test/dev (~50 lines) |
+| `purgeRevoked` | `(log, store, opts?): PurgeResult` | retroactively sweeps revoked events from the read view; log lines + `_events` stay (forensics). Incremental via the `sync.purge_seq` cursor + fingerprint |
+| `getPurgeSeq` | `(store): number` | last swept seq |
 
 ## `SyncOpts` (`src/sync.ts:20-50`)
 
 ```ts
 interface SyncOpts {
   chunkSize?: number; maxRetries?: number; baseMs?: number; maxMs?: number;
-  trustedDevices?: Map<string,string> | Record<string,string>; // non-kosong = verifikasi tiap event pull
-  highValue?: { limit: number; threshold: number };             // bayar >= limit butuh threshold countersign
+  trustedDevices?: Map<string,string> | Record<string,string>; // non-empty = verify every pulled event
+  highValue?: { limit: number; threshold: number };             // bayar >= limit needs threshold countersign
   revokedDevices?: Set<string> | string[]; isRevoked?: (ev: LogEvent) => boolean;
-  revokeVersion?: string | number;                              // stempel versi agar sweep inkremental tahu kapan rescan
-  jitter?: boolean | number | (() => number);                   // default false = deterministik
+  revokeVersion?: string | number;                              // version stamp so the incremental sweep knows when to rescan
+  jitter?: boolean | number | (() => number);                   // default false = deterministic
 }
 ```
 
@@ -53,10 +53,11 @@ createMemoryPeer(log): DeltaPeer;
 syncDelta(log, store, deviceId, peer, opts?): Promise<DeltaResult>;
 ```
 
-Kontrak stripping auth asal: receiver TIDAK menyalin `signature` /
-`countersignatures` / `seq` / `prev_hash` / `hash` pengirim — seq/hash/device
-lokal dicetak baru, asal bertahan hanya sebagai `origin_seq`/`origin_device`.
-Tanpa verifikasi tanda di sini: peer = replika tepercaya satu operator;
-pull dengan registry pemalsu tetap di jalur `pullRemote`.
+Origin-auth-stripping contract: the receiver does NOT copy the sender's
+`signature` / `countersignatures` / `seq` / `prev_hash` / `hash` — local
+seq/hash/device are freshly minted, origin survives only as
+`origin_seq`/`origin_device`. No signature verification here: a peer is a
+trusted same-operator replica; pulls with a forgery registry still go through
+`pullRemote`.
 
-Janji perilaku yang mengikat ada di [contracts](contracts.md).
+The binding behavioral promises live in [contracts](contracts.md).

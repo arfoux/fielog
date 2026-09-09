@@ -1,62 +1,62 @@
 # cli
 
-Referensi `bin/fielog.ts`. Tiap flag di bawah terverifikasi terhadap kode —
-yang tidak ada di `usage()` / `arg()` tidak didokumentasikan.
+Reference for `bin/fielog.ts`. Every flag below is verified against the code —
+anything absent from `usage()` / `arg()` is not documented.
 
 ```
 pakai: fielog <serve|sync|demo> [opsi]
 ```
 
-## `serve` — jalankan relay ws file-backed (`cmdServe`)
+## `serve` — run the file-backed ws relay (`cmdServe`)
 
-| flag | wajib | arti |
+| flag | required | meaning |
 |---|---|---|
-| `--port <n>` | tidak (default `8091`) | port listen (`Number(arg(rest,'--port','8091'))`) |
-| `--file <relay.log>` | tidak (default `relay.log`) | file persistensi JSONL relay |
-| `--trust <id=pub.pem>` | ya, kecuali `--unsigned` | daftarkan device tepercaya; boleh diulang per device; format harus `id=path`, pubkey dibaca + trim, tak terbaca = `die` exit 2 |
-| `--unsigned` | alternatif `--trust` | relay terbuka warisan: terima `device_id` apa pun. Hanya dev lokal |
+| `--port <n>` | no (default `8091`) | listen port (`Number(arg(rest,'--port','8091'))`) |
+| `--file <relay.log>` | no (default `relay.log`) | JSONL persistence file of the relay |
+| `--trust <id=pub.pem>` | yes, unless `--unsigned` | register a trusted device; repeatable per device; format must be `id=path`, pubkey is read + trimmed, unreadable = `die` exit 2 |
+| `--unsigned` | alternative to `--trust` | legacy open relay: accepts any `device_id`. Local dev only |
 
-Tanpa `--trust` dan tanpa `--unsigned` → `die('serve butuh --trust ...')`,
-exit 2. Saat jalan, cetak `fielog relay listening ws://127.0.0.1:<port>
-file=<file>` + `ready port=<port>`; hidup sampai `SIGINT`/`SIGTERM`.
+Without `--trust` and without `--unsigned` → `die('serve butuh --trust ...')`,
+exit 2. While running, it prints `fielog relay listening ws://127.0.0.1:<port>
+file=<file>` + `ready port=<port>`; lives until `SIGINT`/`SIGTERM`.
 
 ```sh
-# sekali saja: lahirkan kunci device (PEM standar: PRIV PKCS#8, PUB SPKI)
+# one time only: mint the device key (standard PEM: PRIV PKCS#8, PUB SPKI)
 openssl genpkey -algorithm ed25519 -out kasir.priv
 openssl pkey -in kasir.priv -pubout -out kasir.pub
 bun bin/fielog.ts serve --port 8091 --file ./relay.log --trust kasir=./kasir.pub
-bun bin/fielog.ts serve --port 8091 --file ./relay.log --unsigned   # dev saja
+bun bin/fielog.ts serve --port 8091 --file ./relay.log --unsigned   # dev only
 ```
 
-## `sync` — dorong+tarik delta satu file kernel (`cmdSync`)
+## `sync` — push+pull the delta of one kernel file (`cmdSync`)
 
-| flag | wajib | arti |
+| flag | required | meaning |
 |---|---|---|
-| `--file <kasir.db>` | ya | file kernel lokal |
-| `--relay <ws url>` | ya | URL relay, mis. `ws://127.0.0.1:8091` |
-| `--key <priv.pem>` | ya, kecuali `--unsigned` | privkey device; token kapabilitas dicetak via `kernel.capToken` |
-| `--as <device>` | ya bila `--key` | id device penanda + pemilik token |
-| `--unsigned` | alternatif `--key/--as` | tanpa tanda (dev saja) |
+| `--file <kasir.db>` | yes | local kernel file |
+| `--relay <ws url>` | yes | relay URL, e.g. `ws://127.0.0.1:8091` |
+| `--key <priv.pem>` | yes, unless `--unsigned` | device privkey; the capability token is minted via `kernel.capToken` |
+| `--as <device>` | yes with `--key` | signing device id + token owner |
+| `--unsigned` | alternative to `--key/--as` | unsigned (dev only) |
 
-`--key` tanpa `--as` → `die` exit 2. Sukses cetak
-`sync pushed=<n> acked=<n> pulled=<n> applied=<n>`; client + kernel selalu
-ditutup (`finally`). Catatan: sync CLI selalu chunk default (`chunkSize`
-default 10 di `pushPending`) — untuk bulk pakai API `kernel.sync` dengan
+`--key` without `--as` → `die` exit 2. On success prints
+`sync pushed=<n> acked=<n> pulled=<n> applied=<n>`; client + kernel are always
+closed (`finally`). Note: CLI sync always uses the default chunk (`chunkSize`
+defaults to 10 in `pushPending`) — for bulk use the `kernel.sync` API with
 `{ chunkSize: 500 }`.
 
 ```sh
 bun bin/fielog.ts sync --file ./kasir.db --relay ws://127.0.0.1:8091 --key ./kasir.priv --as kasir
-bun bin/fielog.ts sync --file ./kasir.db --relay ws://127.0.0.1:8091 --unsigned   # dev saja
+bun bin/fielog.ts sync --file ./kasir.db --relay ws://127.0.0.1:8091 --unsigned   # dev only
 ```
 
-## `demo` — kasir 2 HP (tanpa flag)
+## `demo` — 2-phone kasir (no flags)
 
-`bun bin/fielog.ts demo`: 20 penjualan offline di hp1, sync dua sisi mode
-tanda, lalu membuktikan `hp1 == hp2 == expected`, else exit 1
-(`cmdDemo`). Keluar: `sync: hp1 = ... | hp2 = ... | mau = ...` dan
+`bun bin/fielog.ts demo`: 20 offline sales on hp1, two-sided signed-mode sync,
+then proves `hp1 == hp2 == expected`, else exit 1
+(`cmdDemo`). Output: `sync: hp1 = ... | hp2 = ... | mau = ...` and
 `sama dua sisi, total cocok`.
 
 ## exit code
 
-`0` sukses; `1` demo total beda; `2` pemakaian salah (pesan + usage ke
-stderr, tulis sinkron sebelum exit agar tidak hilang saat pipe).
+`0` success; `1` demo totals differ; `2` wrong usage (message + usage to
+stderr, written synchronously before exit so nothing is lost when piped).

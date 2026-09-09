@@ -45,7 +45,7 @@ Named constants in `src/auth.ts` (no magic numbers at call sites):
 Callers needing longer sessions pass an explicit `ttlMs`. `verifyCapToken`
 also rejects `expiresAt <= issuedAt` (negative/zero TTL can never verify).
 
-## cara revoke
+## Revoking
 
 - Per token: `CapRevocationList.revoke(token.id)`; `verifyCapToken` and
   `authorizeCapToken({ revocations })` reject that id. Sibling tokens from
@@ -57,7 +57,7 @@ also rejects `expiresAt <= issuedAt` (negative/zero TTL can never verify).
 - Rotation without redial: `WsRelayClient.setCapToken` swaps the token on
   a live socket. Mint short-lived tokens and rotate before expiry.
 
-## batas live-socket jujur
+## Honest live-socket limits
 
 - Self-signed means possession of a valid token equals the device key for
   its scopes until expiry or revocation. A leaked token is fully usable by

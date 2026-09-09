@@ -17,7 +17,7 @@ Standalone module on purpose: no kernel wiring. The kernel keeps its
 own outbox cap (`ERR_OUTBOX_FULL`, `maxPending` in `src/kernel.ts`);
 this guard covers bytes-on-disk, a different axis.
 
-## pakai
+## Usage
 
 ```ts
 import { openQuotaGuard } from '../src/quota.ts';
@@ -32,14 +32,14 @@ try {
 g.check(); // throws ERR_QUOTA_EXCEEDED if files outgrew the ceiling
 ```
 
-| api | arti |
+| api | meaning |
 |---|---|
 | `usage()` | measured bytes of `files`; missing file = 0, unmeasurable = throw |
 | `reserve(n)` / `release(n)` | hold / free `n` bytes (`n` positive integer; release clamps at 0) |
 | `remaining()` | `limit - used - held` (measured, so it can throw) |
 | `check()` / `status()` | deny / report against the ceiling right now |
 
-## bukti run (2026-09-06, base a80c1b9 = v0.14.16)
+## Run evidence (2026-09-06, base a80c1b9 = v0.14.16)
 
 ```text
 $ bun test test/quota.test.ts
@@ -63,4 +63,4 @@ rejected with nothing held.
   usage survives, it is re-statted from disk).
 - Full suite (`bun test`, 95 pass / 0 fail / 37 files at base) NOT
   re-run here: previous worker died OOM on it; only the new file ran.
-- FASE-2 (merge + tag) hanya via instruksi inbox koordinator.
+- Phase-2 (merge + tag) only via coordinator inbox instruction.

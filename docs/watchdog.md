@@ -1,6 +1,6 @@
 # watchdog supervisor
 
-Port of skill-24 (`watchdog-supervisor`, status MANTAP) to fielog.
+Port of skill-24 (`watchdog-supervisor`, status SOLID) to fielog.
 One script polls one orchestration wave and wakes the coordinator on
 three conditions: `worker_done`, `escalation`, or `timeout`.
 
@@ -89,7 +89,7 @@ exit=0
 
 No wake for escalation or timeout was needed: the wave finished clean
 in ~8 minutes (22:41 dispatch -> 22:48:54 last done), inside the 900 s
-budget. That matches the skill-24 proof note ("bukti: tiap gelombang").
+budget. That matches the skill-24 proof note ("evidence: one proof per wave").
 
 ## dry-run record (2026-09-06, fixtures from live state)
 
@@ -131,5 +131,5 @@ exit=3
   coordinator verifies with `worker-read` before acting.
 - Escalation detection covers task `outcome`; free-text coordinator
   inbox escalations are out of scope for this script.
-- Fase-2 (merge + tag) is never done by the watchdog; it only wakes
+- Phase-2 (merge + tag) is never done by the watchdog; it only wakes
   the coordinator, which acts via its own inbox.

@@ -1,34 +1,34 @@
 # corruption-generator
 
-Port skill-9 (`corruption-generator`, status sehat) ke fielog: lib
-deterministik untuk menyuntik satu fault per run ke jsonl log, plus test
-detektor yang membuktikan tiap fault tertangkap saat reopen.
+Port of skill-9 (`corruption-generator`, status HEALTHY) to fielog: a
+deterministic lib injecting one fault per run into the JSONL log, plus
+detector tests proving each fault is caught on reopen.
 
-## file
+## Files
 
 - `scripts/corrupt-gen.ts` — `bitflip(path, lineNo)` + `tornTail(path)` +
-  `truncateTail(path, dropLast)`; throw di luar range, tanpa random.
-- `test/corrupt-gen.test.ts` — 3 test detektor via `health()` /
-  `verifyLog()`; sibling deterministik dari `test/corrupt.test.ts`
-  (satu fault handmade, hanya dibaca) dan `test/kill9.test.ts`
-  (sigkill asli, hanya dibaca).
-- `test/corrupt.test.ts` — pola acuan: bitrot mid-file -> `quarantined 1`,
-  `gaps [6]`, `verify ok`, sync 9/9, reopen stabil.
+  `truncateTail(path, dropLast)`; throws out of range, no randomness.
+- `test/corrupt-gen.test.ts` — 3 detector tests via `health()` /
+  `verifyLog()`; deterministic sibling of `test/corrupt.test.ts`
+  (one handmade fault, read-only) and `test/kill9.test.ts`
+  (real sigkill, read-only).
+- `test/corrupt.test.ts` — reference pattern: mid-file bitrot -> `quarantined 1`,
+  `gaps [6]`, `verify ok`, sync 9/9, reopen stable.
 
-## mode -> detektor (`src/log.ts` openLog)
+## Modes -> detectors (`src/log.ts` openLog)
 
-| mode | suntik | deteksi saat reopen |
+| mode | injection | detection on reopen |
 |---|---|---|
-| `bitflip` | bit rendah index 1 (`"` -> `#`) di mid-file line, bukan last | `quarantined 1`, `gaps [line+1]`, `verify ok:true`, `events n-1` |
-| `tornTail` | paruh akhir last line, tanpa trailing newline (kill mid-append) | `repairedTail true`, `events n-1`, `verify ok:true` |
-| `truncateTail` | buang n tail line utuh di batas newline (lost suffix) | `events n-drop`, `quarantined 0`, `verify ok:true`, prefix valid |
+| `bitflip` | low bit of index 1 (`"` -> `#`) on a mid-file line, not last | `quarantined 1`, `gaps [line+1]`, `verify ok:true`, `events n-1` |
+| `tornTail` | second half of the last line, no trailing newline (kill mid-append) | `repairedTail true`, `events n-1`, `verify ok:true` |
+| `truncateTail` | drops n whole tail lines at a newline boundary (lost suffix) | `events n-drop`, `quarantined 0`, `verify ok:true`, prefix valid |
 
-`bitflip` menolak last line: itu teritori `tornTail`. `truncateTail`
-menolak `dropLast >= total`: jangan kosongkan log via corruptor.
+`bitflip` refuses the last line: that is `tornTail` territory. `truncateTail`
+refuses `dropLast >= total`: never empty the log via the corruptor.
 
-## run
+## Run
 
 - `bun test test/corrupt-gen.test.ts`: 3 pass, 0 fail (~0.5s).
-- `bun test test/corrupt.test.ts`: 1 pass, 0 fail (~0.5s, pola acuan tetap hijau).
-- base: `d03e683` (`v0.14.13`), 35 test files; suite penuh tidak diulang
-  di sini (soak/flake ~300s+, timeout 120s pada run bukti).
+- `bun test test/corrupt.test.ts`: 1 pass, 0 fail (~0.5s, reference pattern still green).
+- base: `d03e683` (`v0.14.13`), 35 test files; full suite not re-run
+  here (soak/flake ~300s+, 120s timeout on the proof run).

@@ -1,50 +1,50 @@
 # limits-troubleshooting
 
-Batasan jujur + cara keluar dari masalah umum. Tanpa janji palsu.
+Honest limits + ways out of common problems. No false promises.
 
-## batasan desain
+## Design limits
 
-- Bun only. `bun:sqlite` + `Bun.serve` tidak ada di Node (`docs/install.md`).
-- Satu proses per file. Dua penulis beda proses di satu `kasir.log` /
-  `cas.json` balap last-write-wins (lihat [cas-store](cas-store.md)).
-- Outbox berbatas: default 50_000 event belum sync, lewat itu `append`
-  throw `ERR_OUTBOX_FULL` (`maxPending`, `src/kernel.ts`). Sync untuk
-  menguras, atau naikkan sadar (`maxPending`) untuk build bench raksasa.
-- Relay unsigned = siapa pun boleh mengaku device apa pun. Produksi wajib
-  `--trust` + token (lihat [auth](auth.md)).
-- Token kapabilitas self-signed: bocor = bisa dipakai pemegangnya sampai
-  expiry/revoke. Minta pendek + rotasi.
-- Hidden bukan enkripsi: `kernel.query` SQL mentah tetap melihat baris
-  hidden; hold tidak tersync ke peer (lihat
+- Bun only. `bun:sqlite` + `Bun.serve` do not exist in Node (`docs/install.md`).
+- One process per file. Two writers in different processes on one `kasir.log` /
+  `cas.json` race last-write-wins (see [cas-store](cas-store.md)).
+- Bounded outbox: default 50_000 unsynced events, past that `append`
+  throws `ERR_OUTBOX_FULL` (`maxPending`, `src/kernel.ts`). Sync to
+  drain, or knowingly raise (`maxPending`) for giant bench builds.
+- Unsigned relay = anyone may claim any device. Production requires
+  `--trust` + token (see [auth](auth.md)).
+- Self-signed capability tokens: leaked = usable by whoever holds them until
+  expiry/revocation. Keep them short + rotate.
+- Hidden is not encryption: raw-SQL `kernel.query` still sees hidden rows;
+  holds never sync to peers (see
   [tombstone-engine](tombstone-engine.md)).
-- `quota.ts` standalone: tidak ada wiring kernel; caller reserve manual
-  (lihat [quota-guard](quota-guard.md)).
-- `deltasync.ts` tanpa verifikasi tanda: hanya untuk replika tepercaya
-  satu operator (lihat [sync-protocol](sync-protocol.md)).
-- Bench query 100k butuh build ~259 dtk sekali jalan; latensi di
-  [bench](bench.md) adalah steady-state pasca-build.
+- `quota.ts` is standalone: no kernel wiring; callers reserve manually
+  (see [quota-guard](quota-guard.md)).
+- `deltasync.ts` has no signature verification: only for trusted same-operator
+  replicas (see [sync-protocol](sync-protocol.md)).
+- The 100k bench query needs a ~259 s one-time build; latencies in
+  [bench](bench.md) are post-build steady-state.
 
-## troubleshooting
+## Troubleshooting
 
-| gejala | sebab kemungkinan | jalan keluar |
+| symptom | likely cause | fix |
 |---|---|---|
-| `ERR_DEVICE_MISMATCH` saat buka | `deviceId` eksplisit beda dari id eksplisit tersimpan | buka dengan id tersimpan, atau file baru untuk device baru |
-| `ERR_OUTBOX_FULL` | outbox ≥ cap | `sync`, lalu append lagi |
-| `bayar rejected: nominal ...` | nominal tidak integer positif | perbaiki input; tidak ada baris log tertulis (fail-fast) |
-| `bayar rejected: state ...` | state selain `DRAFT`/`IOU_RECORDED` | settlement hanya via `settle`/ack online |
-| `ERR_UNKNOWN_TARGET` (hide/hold) | id salah ketik / target belum sync | cek id; kompensator buta (`undo`/`settle`) tidak butuh target lokal |
-| `ERR_NOT_HIDDEN` (show) | id memang tidak hidden | tidak ada baris tertulis; cek `hiddenIds` |
-| `serve butuh --trust ...` (exit 2) | serve tanpa registry | tambah `--trust id=pub.pem` atau `--unsigned` (dev) |
-| `relay rejected push/pull` | token scope salah / device terevoke / tak dikenal | cek scope token, expiry, registry `--trust`, status revoke |
-| sync macet di satu event | poison/pemalsu — by design dikarantina, cursor maju | cek `_quarantine` via `listQuarantine`; data bukti tetap ada |
-| `health().repairedTail = true` | kill di tengah append; ekor robek dipotong saat buka | normal; data utuh = sampai seq terakhir valid |
-| `health().gaps` non-kosong | seq di-anchore ulang setelah baris karantina | celah yang diketahui, bukan tamper (lihat [quarantine](quarantine.md)) |
-| port sudah dipakai | relay lama masih hidup | `kill` proses lama / `--port` lain; `start()` ganda throw `relay already started` |
-| `ERR_QUOTA_EXCEEDED` | file melebihi ceiling guard | release reservasi / naikkan ceiling |
-| `ERR_QUOTA_UNKNOWN` | path tak bisa di-stat | perbaiki permission/path; guard fail-closed |
+| `ERR_DEVICE_MISMATCH` on open | explicit `deviceId` differs from the stored explicit id | open with the stored id, or a new file for a new device |
+| `ERR_OUTBOX_FULL` | outbox ≥ cap | `sync`, then append again |
+| `bayar rejected: nominal ...` | nominal is not a positive integer | fix the input; no log line is written (fail-fast) |
+| `bayar rejected: state ...` | state other than `DRAFT`/`IOU_RECORDED` | settlement only via `settle`/online ack |
+| `ERR_UNKNOWN_TARGET` (hide/hold) | mistyped id / target not yet synced | check the id; blind compensators (`undo`/`settle`) need no local target |
+| `ERR_NOT_HIDDEN` (show) | the id is genuinely not hidden | nothing is written; check `hiddenIds` |
+| `serve butuh --trust ...` (exit 2) | serve without a registry | add `--trust id=pub.pem` or `--unsigned` (dev) |
+| `relay rejected push/pull` | wrong token scope / revoked / unknown device | check token scope, expiry, the `--trust` registry, revocation status |
+| sync stuck on one event | poison/forgery — quarantined by design, cursor advances | check `_quarantine` via `listQuarantine`; the evidence data stays |
+| `health().repairedTail = true` | kill mid-append; the torn tail is trimmed on open | normal; intact data = up to the last valid seq |
+| `health().gaps` non-empty | seqs re-anchored after quarantine lines | known gaps, not tampering (see [quarantine](quarantine.md)) |
+| port already in use | the old relay is still alive | `kill` the old process / another `--port`; double `start()` throws `relay already started` |
+| `ERR_QUOTA_EXCEEDED` | files exceed the guard ceiling | release reservations / raise the ceiling |
+| `ERR_QUOTA_UNKNOWN` | path cannot be stat'ed | fix permissions/path; the guard is fail-closed |
 
-## minta tolong
+## Getting help
 
-Sertakan: versi (`package.json`), perintah persis, pesan error persis,
-`health()` + `verifyLog()` bila soal log. Lapor sesuai
-[SECURITY](../SECURITY.md) bila soal keamanan.
+Include: version (`package.json`), the exact command, the exact error
+message, `health()` + `verifyLog()` for log issues. Report per
+[SECURITY](../SECURITY.md) for security issues.

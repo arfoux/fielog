@@ -1,41 +1,41 @@
 # relay
 
-Transport websocket asli di atas `Bun.serve`, tanpa dependensi
-(`src/relay.ts`). Relay tetap bodoh: terima log mentah, broadcast, simpan.
+Native websocket transport over `Bun.serve`, zero dependencies
+(`src/relay.ts`). The relay stays dumb: accept raw logs, broadcast, store.
 
 ## `WsRelayServer` (`src/relay.ts:14-27,62-...`)
 
 ```ts
 interface WsRelayServerOpts {
-  port?: number;            // 0 = ephemeral, baca balik via .port
-  file?: string;            // persistensi JSONL; dimuat saat boot
-  hbMs?: number;            // interval ping server
-  dropRate?: number;        // chaos 0..1 (deterministik via mulberry32)
+  port?: number;            // 0 = ephemeral, read back via .port
+  file?: string;            // JSONL persistence; loaded at boot
+  hbMs?: number;            // server ping interval
+  dropRate?: number;        // chaos 0..1 (deterministic via mulberry32)
   seed?: number;
-  trustedDevices?: Record<string,string>; // deviceId -> pubkey PEM; non-kosong = enforcement nyala
+  trustedDevices?: Record<string,string>; // deviceId -> pubkey PEM; non-empty = enforcement on
   revokeAdmins?: Record<string,string>;
-  allowUnsigned?: boolean;  // default warisan terbuka (dev); CLI meneruskan false kecuali --unsigned
+  allowUnsigned?: boolean;  // legacy default open (dev); the CLI passes false unless --unsigned
 }
 ```
 
-| member | arti |
+| member | meaning |
 |---|---|
-| `start(): Promise<number>` | nyalakan; kembalikan port aktual. Tolak start ganda; fail-closed bila `allowUnsigned === false` tanpa device |
-| `kill(): void` | matikan abrupt; request in-flight mati tanpa ack |
-| `port: number` | port listen (throw bila belum start) |
-| `size: number` | event tersimpan |
-| `storedIds(): string[]` | semua UUID di disk (audit exact-once) |
-| `registerDevice(id, pubPem): void` | daftarkan device; enforcement nyala sejak satu device dikenal (`enforcing`) |
-| `revokeDevice(id): void` | tombstone device: tolak push/pull berikut, broadcast `revoked`, persist sidecar `.revocations` |
-| `isRevoked(id) / revokedIds()` | cek / daftar revoke (tombstone + log `*`) |
-| `issueRevoke(adminPrivPem, admin, input, now?): RevokeEvent` | revoke bertanda admin ke log konvergen (persist `.revoke-events`, fsync sebelum ack) |
-| `revokeSnapshot() / revokeCursor()` | view kanonik byte-equal antar replika / panjang log lokal |
-| `serverTime` | jam otoritatif (`1_700_000_000_000` awal); counter `pushesReceived`, `pullsReceived`, `rejectsReceived`, ... |
-| `mulberry32(seed)` | rng deterministik untuk chaos test |
+| `start(): Promise<number>` | start; return the actual port. Refuse double start; fail-closed when `allowUnsigned === false` without devices |
+| `kill(): void` | abrupt shutdown; in-flight requests die without ack |
+| `port: number` | listen port (throws before start) |
+| `size: number` | stored events |
+| `storedIds(): string[]` | all UUIDs on disk (exact-once audit) |
+| `registerDevice(id, pubPem): void` | register a device; enforcement turns on once one device is known (`enforcing`) |
+| `revokeDevice(id): void` | tombstone a device: reject next push/pull, broadcast `revoked`, persist the `.revocations` sidecar |
+| `isRevoked(id) / revokedIds()` | check / list revocations (tombstone + `*` log) |
+| `issueRevoke(adminPrivPem, admin, input, now?): RevokeEvent` | admin-signed revocation into the convergent log (persist `.revoke-events`, fsync before ack) |
+| `revokeSnapshot() / revokeCursor()` | byte-equal canonical view across replicas / local log length |
+| `serverTime` | authoritative clock (`1_700_000_000_000` at start); counters `pushesReceived`, `pullsReceived`, `rejectsReceived`, ... |
+| `mulberry32(seed)` | deterministic rng for chaos tests |
 
-Crash model: tiap event dipersist ke file JSONL SEBELUM ack — kill + restart +
-resume client dari ack cursor = exact-once per UUID. Broadcast `live` hanya
-hint; pull sumber kebenaran.
+Crash model: every event is persisted to the JSONL file BEFORE ack — kill +
+restart + client resume from the ack cursor = exact-once per UUID. `live`
+broadcast is only a hint; pull is the source of truth.
 
 ## `WsRelayClient` (`src/relay.ts:551-559,571-856`)
 
@@ -46,23 +46,23 @@ new WsRelayClient(url: string, opts?: WsRelayClientOpts);
 MAX_LIVE_HINTS = 1000;
 ```
 
-| member | arti |
+| member | meaning |
 |---|---|
-| `push(batch): Promise<PushAck>` | dorong; error protokol sebagai `relay rejected push: ...` |
-| `pull(since): Promise<{ events, cursor }>` | tarik + gabung hint live (dedupe UUID); buffer live dibatasi |
-| `setCapToken(t \| undefined): void` | rotasi token tanpa redial |
-| `syncRevokes(): Promise<{ added, skipped, rejected, serverCursor }>` | handshake revoke dua arah (pull–offer–pull) |
-| `pushRevokes / pullRevokes` | tawar / ambil ekor revoke mentah |
-| `revokeSnapshot() / isTokenRevoked / isDeviceRevoked` | view konvergen lokal + cek |
-| `close(): void` | tutup manual |
-| lapang | `revokedNotices: string[]`, `liveCount`, `pingsReceived`, `reconnects`, `revokeSyncs`, `revokeRejected` |
+| `push(batch): Promise<PushAck>` | push; protocol errors as `relay rejected push: ...` |
+| `pull(since): Promise<{ events, cursor }>` | pull + merge live hints (UUID dedupe); live buffer is bounded |
+| `setCapToken(t \| undefined): void` | rotate the token without redial |
+| `syncRevokes(): Promise<{ added, skipped, rejected, serverCursor }>` | two-way revocation handshake (pull–offer–pull) |
+| `pushRevokes / pullRevokes` | offer / fetch the raw revocation tail |
+| `revokeSnapshot() / isTokenRevoked / isDeviceRevoked` | local convergent view + checks |
+| `close(): void` | manual close |
+| fields | `revokedNotices: string[]`, `liveCount`, `pingsReceived`, `reconnects`, `revokeSyncs`, `revokeRejected` |
 
-Reconnect dengan backoff+jitter, resume via cursor; ping/pong tiap `hbMs`
-(default 1000 ms, drop setelah 3x).
+Reconnects with backoff+jitter, resumes via cursor; ping/pong every `hbMs`
+(default 1000 ms, drop after 3x).
 
-## pola pakai
+## Usage patterns
 
-- Test/dev: `MemoryRelay` (lihat [sync-protocol](sync-protocol.md)) atau
-  `WsRelayServer` tanpa `trustedDevices` (terbuka, dev saja).
-- Produksi: daftarkan tiap device (`--trust` di CLI) + token kapabilitas
-  per push/pull (lihat [auth](auth.md), [cli](cli.md)).
+- Test/dev: `MemoryRelay` (see [sync-protocol](sync-protocol.md)) or
+  `WsRelayServer` without `trustedDevices` (open, dev only).
+- Production: register each device (`--trust` in the CLI) + capability token
+  per push/pull (see [auth](auth.md), [cli](cli.md)).

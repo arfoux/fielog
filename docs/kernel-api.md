@@ -1,6 +1,6 @@
 # kernel-api
 
-Referensi API kernel, log, dan store. Tanda tangan persis `src/`.
+Kernel, log, and store API reference. Signatures match `src/` exactly.
 
 ## `createKernel(opts)` (`src/kernel.ts`)
 
@@ -8,9 +8,9 @@ Referensi API kernel, log, dan store. Tanda tangan persis `src/`.
 interface KernelOpts {
   file: string;              // 'kasir.db' (+ sidecar 'kasir.log' via logPathFor)
   deviceId?: string;
-  clock?: () => number;      // sumber ts_device (display saja). Seam test skew
-  maxPending?: number;       // cap outbox, default 50_000 (DEFAULT_OUTBOX_CAP)
-  privateKeyPem?: string;    // tiap append lokal ditandatangani di sumber
+  clock?: () => number;      // ts_device source (display only). Test skew seam
+  maxPending?: number;       // outbox cap, default 50_000 (DEFAULT_OUTBOX_CAP)
+  privateKeyPem?: string;    // every local append is signed at the source
 }
 createKernel(opts: KernelOpts): Promise<Kernel>;
 logPathFor(file: string): string; // 'kasir.db' -> 'kasir.log'
@@ -18,23 +18,23 @@ logPathFor(file: string): string; // 'kasir.db' -> 'kasir.log'
 
 ## `Kernel` (`src/kernel.ts:60-83`)
 
-| method | tanda tangan | janji |
+| method | signature | guarantee |
 |---|---|---|
-| append | `append(args: AppendArgs): Promise<LogEvent>` | tulis log + fsync, tanpa jaringan. `AppendArgs = { type, payload } \| { type, ...isi, actor? }`. `bayar` butuh `nominal` integer positif; state hanya `DRAFT`/`IOU_RECORDED` |
-| query | `query<T>(sql: string, params?: SqlParams): Promise<T[]>` | baca SQLite lokal, tanpa jaringan. Named param boleh polos (`{id}` jadi `$id`) |
-| undo | `undo(eventId: string, actor?: string): Promise<LogEvent>` | event kompensasi `undo.compensate`; riwayat tidak dihapus; buta (target boleh belum tiba — lihat [contracts](contracts.md)) |
+| append | `append(args: AppendArgs): Promise<LogEvent>` | writes log + fsync, no network. `AppendArgs = { type, payload } \| { type, ...fields, actor? }`. `bayar` needs a positive integer `nominal`; state only `DRAFT`/`IOU_RECORDED` |
+| query | `query<T>(sql: string, params?: SqlParams): Promise<T[]>` | reads local SQLite, no network. Named params may be bare (`{id}` becomes `$id`) |
+| undo | `undo(eventId: string, actor?: string): Promise<LogEvent>` | compensation event `undo.compensate`; history is never deleted; blind (the target may not have arrived — see [contracts](contracts.md)) |
 | settle | `settle(eventId: string, 'settled' \| 'failed' \| 'expired', actor?: string): Promise<LogEvent>` | `payment.settled` / `payment.failed` / `payment.expired` |
-| sync | `sync(relay: Relay \| Relay[], opts?: SyncOpts): Promise<PushResult & PullResult & { pushRelay?, pullRelay? }>` | satu relay atau failover berurutan; URL mentah ditolak (butuh objek `Relay` dengan `push`/`pull`) |
-| capToken | `capToken(privateKeyPem: string, scopes? = ['relay:push','relay:pull'], ttlMs? = CAP_TOKEN_TTL_MS): CapToken` | cetak token kapabilitas device ini |
-| conflicts | `conflicts(): Promise<Record<string, unknown>[]>` | baris `conflicts WHERE status = 'open'` untuk rekonsiliasi manusia |
-| ackSeq | `ackSeq(): number` | seq lokal yang sudah di-ack relay |
-| serverTime | `serverTime(): number \| null` | `server_time` otoritatif terakhir |
-| verifyLog | `verifyLog(): { ok, at?, reason?, gaps? }` | verifikasi rantai hash |
-| health | `health(): { events, quarantined, repairedTail, gaps }` | kondisi log: baris korup, ekor robek, celah |
-| snapshot | `snapshot(dest?: string): Promise<SnapshotInfo>` | salinan penuh db + seal prefix acked |
-| truncate | `truncate(): Promise<TruncateInfo>` | sapu prefix tersegel; no-op bila belum disegel |
-| close | `close(): void` | tutup fd log + db |
-| lapang | `deviceId, dbPath, logPath: string` | identitas + path |
+| sync | `sync(relay: Relay \| Relay[], opts?: SyncOpts): Promise<PushResult & PullResult & { pushRelay?, pullRelay? }>` | one relay or ordered failover; raw URLs are rejected (needs a `Relay` object with `push`/`pull`) |
+| capToken | `capToken(privateKeyPem: string, scopes? = ['relay:push','relay:pull'], ttlMs? = CAP_TOKEN_TTL_MS): CapToken` | mints this device's capability token |
+| conflicts | `conflicts(): Promise<Record<string, unknown>[]>` | rows `conflicts WHERE status = 'open'` for human reconciliation |
+| ackSeq | `ackSeq(): number` | local seq already acked by the relay |
+| serverTime | `serverTime(): number \| null` | latest authoritative `server_time` |
+| verifyLog | `verifyLog(): { ok, at?, reason?, gaps? }` | hash-chain verification |
+| health | `health(): { events, quarantined, repairedTail, gaps }` | log health: corrupt lines, torn tail, gaps |
+| snapshot | `snapshot(dest?: string): Promise<SnapshotInfo>` | full db copy + acked-prefix seal |
+| truncate | `truncate(): Promise<TruncateInfo>` | sweeps the sealed prefix; no-op when unsealed |
+| close | `close(): void` | closes the log fd + db |
+| fields | `deviceId, dbPath, logPath: string` | identity + paths |
 
 ## `LogEvent` / `AppendLog` (`src/log.ts`)
 
@@ -51,8 +51,8 @@ interface AppendLog {
 }
 ```
 
-Fungsi murni: `hashFor(e)`, `canonicalOf(e)` (kanonik sort-kunci, `server_time`
-disengaja di luar hash), `GENESIS_HASH = 'GENESIS'`.
+Pure functions: `hashFor(e)`, `canonicalOf(e)` (key-sorted canonical form,
+`server_time` deliberately outside the hash), `GENESIS_HASH = 'GENESIS'`.
 
 ## `EventStore` (`src/store.ts:155-172`)
 
@@ -65,13 +65,13 @@ interface EventStore {
   hasId(id: string): boolean; getMeta(k: string): string | null;
   setMeta(k: string, v: string): void; close(): void;
 }
-checkAppend(type: string, payload: Record<string, unknown>): void; // fail-fast sebelum log tersentuh
+checkAppend(type: string, payload: Record<string, unknown>): void; // fail-fast before the log is touched
 MoneyState = { DRAFT, IOU_RECORDED, SETTLED_ONLINE, FAILED, EXPIRED };
 ```
 
-Skema baca (`bayar`, `stock`, `stock_moves`, `records`, `conflicts`,
+Read schema (`bayar`, `stock`, `stock_moves`, `records`, `conflicts`,
 `_events`, `_meta`, `_quarantine`): `src/store.ts:SCHEMA`.
-Uang jujur: offline = IOU; `SETTLED_ONLINE` hanya via settle/sync ack.
+Honest money: offline = IOU; `SETTLED_ONLINE` only via settle/sync ack.
 
-Modul tetangga: [sync-protocol](sync-protocol.md),
+Neighboring modules: [sync-protocol](sync-protocol.md),
 [retention](retention.md), [auth](auth.md).

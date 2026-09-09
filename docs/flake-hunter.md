@@ -1,6 +1,6 @@
 # flake-hunter
 
-Port of skill-1 (`flake-hunter`, status MANTAP) to fielog.
+Port of skill-1 (`flake-hunter`, status SOLID) to fielog.
 Loop the flaky target N times, keep every per-run log, label each
 failure `env` (timing/socket/resource) or `product`
 (assertion/invariant), and print a pass-rate summary.
@@ -110,7 +110,7 @@ Ran 66 tests across 28 files. [413.90s]
 ```
 
 Run started before `test/flake-hunter.test.ts` existed, so 28 files
-is the base set: base `0bb7803` is green 66/0 -> LOLOS. With the new
+is the base set: base `0bb7803` is green 66/0 -> PASS. With the new
 regression file the suite becomes 29 files / 74 tests.
 
 ## limits (by design)
@@ -120,5 +120,5 @@ regression file the suite becomes 29 files / 74 tests.
 - `env` means "looks like the machine/network", not "safe to
   ignore": repeated env flakes on the same target still deserve
   a longer budget or quarantine, decided by a human.
-- Fase-2 (merge + tag) runs only on coordinator inbox
+- Phase-2 (merge + tag) runs only on coordinator inbox
   instruction, never unilaterally.

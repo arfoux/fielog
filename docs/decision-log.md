@@ -4,56 +4,56 @@ status: DROP
 base: 0f89faf (v0.14.25)
 suite: 142 pass, 0 fail, 46 files (`bun test`, 212.85s)
 
-## vonis
+## Verdict
 
-drop-18 iou-machine: DROP. tidak ada tipe/event utang antar-kasir yang
-dibangun. money-state selesai lewat settle/sync-ack yang sudah ada;
-gagal-ya-gagal, bukan utang.
+drop-18 iou-machine: DROP. No inter-kasir debt types/events are built.
+Money-state completes via the existing settle/sync-ack; failed-means-failed,
+not debt.
 
-## alasan
+## Reasons
 
-1. nol tipe/event utang antar-kasir. tidak ada `hutang` / `talangan` /
-   `pinjam` sebagai tipe event maupun kolom read-model. transfer nilai
-   antar device hanya terjadi lewat sync event yang sudah ada.
-2. money-state selesai via settle/sync-ack. offline hanya mencatat
-   DRAFT / IOU_RECORDED; SETTLED_ONLINE hanya lewat
-   `payment.settled`, dan FAILED / EXPIRED merekam hasil akhir lokal.
-   tidak ada state keempat berupa utang.
-3. gagal-ya-gagal bukan utang. `payment.failed` / `payment.expired`
-   adalah terminal, dan settle ganda / settle-setelah-fail menjadi
-   konflik `double-settle` untuk rekonsiliasi manusia, bukan LWW.
-   tidak ada jalan memutar yang mengubah gagal menjadi tagihan.
+1. Zero inter-kasir debt types/events. No `hutang` / `talangan` /
+   `pinjam` as event types or read-model columns. Value moves between
+   devices only via existing sync events.
+2. Money-state completes via settle/sync-ack. Offline only records
+   DRAFT / IOU_RECORDED; SETTLED_ONLINE only via
+   `payment.settled`, and FAILED / EXPIRED record the local final outcome.
+   There is no fourth debt state.
+3. Failed-means-failed, not debt. `payment.failed` / `payment.expired`
+   are terminal, and double settle / settle-after-fail becomes a
+   `double-settle` conflict for human reconciliation, not LWW.
+   There is no workaround turning failure into a bill.
 
-## bukti file:baris
+## File:line evidence
 
 - test/two-device.test.js:29 — `a.append({ type: 'bayar', nominal: 77000 })`
-  offline tanpa relay; tidak ada payload utang.
+  offline without relay; no debt payload.
 - test/two-device.test.js:35 — `SELECT SUM(nominal) ... FROM bayar`
-  konvergen di sisi penerima lewat sync idempoten (uuid), bukan lewat
-  event utang.
-- demo/kasir-2hp.ts:22-34 — 20 transaksi offline di hp1 lalu sync dua
-  sisi sampai total sama; tidak ada langkah talangan antar-kasir.
+  converges on the receiver side via idempotent sync (uuid), not via
+  debt events.
+- demo/kasir-2hp.ts:22-34 — 20 offline transactions on hp1 then two-sided
+  sync until totals match; no inter-kasir bridging step.
 - src/store.ts:50-82 — MoneyState (DRAFT, IOU_RECORDED, SETTLED_ONLINE,
-  FAILED, EXPIRED) + checkAppend menolak state bayar selain DRAFT /
-  IOU_RECORDED saat offline.
+  FAILED, EXPIRED) + checkAppend rejects any bayar state besides DRAFT /
+  IOU_RECORDED while offline.
 - src/kernel.ts:67-68 — `settle(eventId, outcome, actor)`: 'settled'
-  butuh online ack; failed/expired tercatat lokal.
+  needs an online ack; failed/expired are recorded locally.
 
-## asumsi tertulis
+## Written assumptions
 
-1. satu trust-domain: kedua kasir milik pemilik yang sama.
-2. bayar lunas: tiap `bayar` dianggap tunai lunas di tempat; tidak ada
-   cicilan, titip, atau ganti-rugi antar-kasir.
+1. One trust domain: both kasirs belong to the same owner.
+2. Paid-in-full bayar: every `bayar` counts as cash settled on the spot; no
+   installments, deposits, or inter-kasir reimbursements.
 
-## klausul kedaluwarsa
+## Expiry clause
 
-bila talangan antar-kasir menjadi kebutuhan nyata (kasir A membayar
-untuk kasir B dan menagih kemudian), vonis DROP ini gugur. rancang dari
-kebutuhan nyata saat itu: definisi pelunasan, bukti, dan batas — bukan
-dari spekulasi hari ini.
+If inter-kasir advances become a real need (kasir A pays
+for kasir B and bills later), this DROP verdict lapses. Design from the
+real need then: settlement definition, evidence, and limits — not from
+today's speculation.
 
-## verifikasi
+## Verification
 
 - `bun test` -> 142 pass, 0 fail, 46 files.
-- mismatch-stop: klaim angka/file:baris di atas hanya dari output
-  perintah dan bacaan berkas di mesin ini; klaim != bukti -> STOP.
+- mismatch-stop: the number/file:line claims above come only from command
+  output and file reads on this machine; claim != proof -> STOP.

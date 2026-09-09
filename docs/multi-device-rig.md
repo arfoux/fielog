@@ -1,35 +1,35 @@
-# multi-device-rig: rig kasir-01/kasir-02 -> konvergen
+# multi-device-rig: kasir-01/kasir-02 rig -> convergence
 
-Skrip `scripts/two-device-rig.sh` menjalankan tiga skenario dua device
-lewat satu relay memori (port of skill-11 multi-device-rig, SEHAT).
-Referensi baca-saja: `test/two-device.test.js` (tidak diubah);
-skenario rig tinggal di `test/two-device-rig.test.ts`.
+The `scripts/two-device-rig.sh` script runs three two-device scenarios
+through one memory relay (port of skill-11 multi-device-rig, HEALTHY).
+Read-only reference: `test/two-device.test.js` (unmodified);
+the rig scenarios live in `test/two-device-rig.test.ts`.
 
-## prasyarat
+## Prerequisites
 
-- base `main` = `d03e683` (`v0.14.13`); `bun test` hijau 88 pass / 0 fail.
+- base `main` = `d03e683` (`v0.14.13`); `bun test` green 88 pass / 0 fail.
 - shell: `bash`, `git`, `bun`.
 
-## prosedur
+## Procedure
 
-1. rig penuh (n default 20):
+1. Full rig (default n 20):
    `bash scripts/two-device-rig.sh`
-2. rig dengan jumlah event lain:
+2. Rig with a different event count:
    `bash scripts/two-device-rig.sh --n 50`
-3. satu skenario saja:
+3. One scenario only:
    `bash scripts/two-device-rig.sh --filter s2`
-4. klaim angka/hash/file HANYA dari output perintah di mesin ini
-   (mismatch-stop): klaim != bukti -> STOP, tulis laporan, jangan lanjut.
+4. Number/hash/file claims ONLY from command output on this machine
+   (mismatch-stop): claim != proof -> STOP, write a report, do not continue.
 
-## skenario
+## Scenarios
 
-| id | nama | bukti konvergensi |
+| id | name | convergence evidence |
 |---|---|---|
-| s1 | kasir-01 jualan offline, kasir-02 tarik sampai sama | total dua sisi = jumlah n event; re-sync `applied=0` |
-| s2 | dua arah tabrakan offline lalu konvergen | total dua sisi = jumlah gabungan 10+10 event |
-| s3 | relay putus tengah batch lalu resume | `relay.size=n` (exact-once by uuid); total kasir-02 = jumlah n event |
+| s1 | kasir-01 sells offline, kasir-02 pulls until equal | both-side total = sum of n events; re-sync `applied=0` |
+| s2 | two-way offline collision then converge | both-side total = combined sum of 10+10 events |
+| s3 | relay drops mid-batch then resumes | `relay.size=n` (exact-once by uuid); kasir-02 total = sum of n events |
 
-## contoh output
+## Example output
 
 ```text
 $ bash scripts/two-device-rig.sh
@@ -40,15 +40,15 @@ two-device-rig: n=20 filter=all
 two-device-rig: PASS pass=3 fail=0 n=20
 ```
 
-s1 total = jumlah `5000 + i*250` untuk `i = 0..19` = 147500.
-s2 total = jumlah `2000 + i*100` + `3000 + i*100` untuk `i = 0..9` = 59000.
-s3 total = jumlah `1000 + i` untuk `i = 0..19` = 20190.
+s1 total = the sum of `5000 + i*250` for `i = 0..19` = 147500.
+s2 total = the sum of `2000 + i*100` + `3000 + i*100` for `i = 0..9` = 59000.
+s3 total = the sum of `1000 + i` for `i = 0..19` = 20190.
 
-## tabel keputusan gagal
+## Failure decision table
 
-| kondisi | sinyal skrip | aksi |
+| condition | script signal | action |
 |---|---|---|
-| total dua sisi beda | `AssertionError` di skenario | STOP: cek urutan sync (s2 butuh ronde tarik kedua); jangan ubah ekspektasi |
-| duplikat setelah resume | `relay.size != n` | STOP: dedupe uuid jebol; eskalasi, bukan retry manual |
-| flag tidak dikenal / n bukan positif | `error: ...` + exit 2 | perbaiki flag, ulangi |
-| test merah | `RIG: FAIL pass=? fail=?` | perbaiki di file rig; `test/two-device.test.js` tetap baca-saja |
+| both-side totals differ | `AssertionError` in the scenario | STOP: check the sync order (s2 needs a second pull round); do not change expectations |
+| duplicates after resume | `relay.size != n` | STOP: uuid dedupe broken; escalate, no manual retry |
+| unknown flag / non-positive n | `error: ...` + exit 2 | fix the flag, retry |
+| red tests | `RIG: FAIL pass=? fail=?` | fix in the rig file; `test/two-device.test.js` stays read-only |

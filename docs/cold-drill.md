@@ -1,59 +1,59 @@
-# cold-drill (adaptasi fielog)
+# cold-drill (fielog adaptation)
 
-Port skill-8 (`cold-drill`, status MANTAP) ke fielog DENGAN ADAPTASI.
-Aslinya: hapus semua kecuali cold tier, buktikan node bangkit dari
-cold tier saja. fielog tak punya cold tier (fakta wave-1) — satu-satunya
-sumber kebenaran adalah log primer (`kasir.log`, JSONL hash-chain).
-Drill ini menghapus semua KECUALI log primer dan membuktikan node
-bangkit dari log saja via replay + verify.
+Port of skill-8 (`cold-drill`, status SOLID) to fielog WITH ADAPTATIONS.
+The original: delete everything except the cold tier, prove the node revives
+from the cold tier alone. fielog has no cold tier (wave-1 fact) — the only
+source of truth is the primary log (`kasir.log`, hash-chained JSONL).
+This drill deletes everything EXCEPT the primary log and proves the node
+revives from the log alone via replay + verify.
 
-## yang dihapus vs dipertahankan
+## Deleted vs kept
 
-| berkas | nasib | alasan |
+| file | fate | reason |
 |---|---|---|
-| `kasir.log` (log primer) | DIPERTAHANKAN | satu-satunya sumber kebenaran |
-| `kasir.db` + `-wal`/`-shm`/`-journal` (sqlite read-model) | DIHAPUS | turunan: dibangun ulang via replay |
-| `kasir.snapshot.db` (snapshot retain) | DIHAPUS | turunan: salinan read-model + seal |
-| `kasir.log.quarantine` (forensik baris korup) | DIHAPUS | turunan: dibuat ulang bila log korup dibaca ulang |
+| `kasir.log` (primary log) | KEPT | the only source of truth |
+| `kasir.db` + `-wal`/`-shm`/`-journal` (sqlite read-model) | DELETED | derived: rebuilt via replay |
+| `kasir.snapshot.db` (retain snapshot) | DELETED | derived: read-model copy + seal |
+| `kasir.log.quarantine` (corrupt-line forensics) | DELETED | derived: recreated when the corrupt log is re-read |
 
-Mekanisme bangkit (`src/kernel.ts`, `createKernel`): `openLog` membaca
-`kasir.log`, `store.replay` membangun ulang sqlite secara idempoten per
-UUID, lalu `verify` memeriksa hash-chain. Uji memakai nominal
-deterministik `1000+i` (`i = 0..n-1`), sehingga total harapan
-`n*1000 + n*(n-1)/2` bisa dibandingkan persis sebelum vs sesudah.
+Revival mechanism (`src/kernel.ts`, `createKernel`): `openLog` reads
+`kasir.log`, `store.replay` rebuilds sqlite idempotently per
+UUID, then `verify` checks the hash chain. The test uses deterministic
+nominal `1000+i` (`i = 0..n-1`), so the expected total
+`n*1000 + n*(n-1)/2` can be compared exactly before vs after.
 
-## batas adaptasi vs aslinya
+## Adaptation limits vs the original
 
-1. Tak ada fetch antar-tier yang diuji — tidak ada tier. Yang diuji
-   murni replay lokal, bukan pengambilan dingin dari penyimpanan jauh.
-2. Meta sqlite ikut hilang: `device.id` (skrip + uji memakai deviceId
-   eksplisit agar stabil), cursor ack (sync berikutnya re-push dari
-   seq 0 — aman karena idempoten per UUID, tapi ada duplikasi kirim),
-   dan `snapshot.sealed_seq` (seal snapshot hilang).
-3. Forensik quarantine ikut terhapus: riwayat baris korup yang pernah
-   dikarantina tidak bertahan — log yang tersisa tetap diverifikasi
-   ulang, celah bernama (`gaps`) muncul bila ada baris hilang.
-4. Log yang pernah di-sweep tetap aman: marker `fielog-truncate` adalah
-   baris pertama `kasir.log` sendiri, jadi ikut dipertahankan.
+1. No cross-tier fetch is tested — there is no tier. What is tested is
+   pure local replay, not a cold fetch from remote storage.
+2. Sqlite meta is lost too: `device.id` (script + test use an explicit
+   deviceId to stay stable), ack cursors (the next sync re-pushes from
+   seq 0 — safe because pushes are idempotent per UUID, but with duplicate
+   sends), and `snapshot.sealed_seq` (snapshot seal lost).
+3. Quarantine forensics are deleted too: the history of once-quarantined
+   corrupt lines does not survive — the remaining log is still re-verified,
+   and named gaps (`gaps`) appear when lines are missing.
+4. A once-swept log stays safe: the `fielog-truncate` marker is the first
+   line of `kasir.log` itself, so it is kept.
 
-## pakai
+## Usage
 
 ```sh
 bash scripts/cold-drill.sh [--n <events>] [--dir <path>] [--keep-dir]
 ```
 
-| flag | default | arti |
+| flag | default | meaning |
 |---|---|---|
-| `--n` | 50 | jumlah event `bayar` deterministik yang disemai |
-| `--dir` | tmp baru | direktori drill (dibuat via `mktemp` di `${TMPDIR:-${TEMP:-${TMP:-/tmp}}}`) |
-| `--keep-dir` | hapus | pertahankan direktori drill untuk inspeksi |
+| `--n` | 50 | number of deterministic seeded `bayar` events |
+| `--dir` | fresh tmp | drill directory (created via `mktemp` in `${TMPDIR:-${TEMP:-${TMP:-/tmp}}}`) |
+| `--keep-dir` | delete | keep the drill directory for inspection |
 
-Skrip hanya baca-tulis direktori drill-nya sendiri; tidak menyentuh
-jaringan, relay, atau file repo. Kode keluar 0 bila `DRILL: PASS`
-(event + total + verify identik sebelum/sesudah), 1 bila `DRILL: FAIL`
-atau galat pemakaian/lingkungan.
+The script only reads/writes its own drill directory; it never touches the
+network, relays, or repo files. Exit code 0 on `DRILL: PASS`
+(events + total + verify identical before/after), 1 on `DRILL: FAIL`
+or usage/environment errors.
 
-## bukti run (2026-09-06, mesin ini)
+## Run evidence (2026-09-06, this machine)
 
 ```
 BEFORE events=50 total=51225 expected=51225 verify=ok
@@ -64,9 +64,9 @@ AFTER events=50 total=51225 expected=51225 verify=ok gaps=[]
 DRILL: PASS (n=50, replay from kasir.log only, totals identical, verify ok)
 ```
 
-perintah bukti: `bash scripts/cold-drill.sh --n 50`
-uji otomatis: `bun test test/cold-drill.test.ts` → `1 pass, 0 fail`
-(skenario sama di dalam proses: semai 30 event, sisakan `kasir.log`,
-buka ulang, nyatakan event + total + verify identik).
+proof command: `bash scripts/cold-drill.sh --n 50`
+automated test: `bun test test/cold-drill.test.ts` → `1 pass, 0 fail`
+(same scenario in-process: seed 30 events, keep only `kasir.log`,
+reopen, assert identical events + total + verify).
 
-FASE-2 (merge + tag) hanya via instruksi inbox koordinator.
+Phase-2 (merge + tag) only via coordinator inbox instruction.

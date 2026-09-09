@@ -1,46 +1,46 @@
 # install
 
-Cara memasang fielog dan syarat runtime-nya.
+How to install fielog and its runtime requirements.
 
-## syarat
+## Requirements
 
-- `bun` >= 1.0 wajib di runtime. Alasannya konkret, bukan selera:
-  `src/store.ts` memakai `bun:sqlite`, `src/relay.ts` memakai `Bun.serve`.
-  Di Node polos keduanya tidak ada.
-- TypeScript opsional (hanya untuk `bun run build` via `tsc -p tsconfig.json`).
+- `bun` >= 1.0 is required at runtime. The reason is concrete, not taste:
+  `src/store.ts` uses `bun:sqlite`, `src/relay.ts` uses `Bun.serve`.
+  Plain Node has neither.
+- TypeScript is optional (only for `bun run build` via `tsc -p tsconfig.json`).
 
-## pasang
+## Install
 
-Paket `fielog` belum terbit di registry npm — `bun add fielog` /
-`npm i fielog` 404 hari ini. Sampai terbit, pakai dari checkout repo:
-runtime tidak butuh install apa pun selain `bun` itu sendiri
-(tanpa `dependencies`). `bun install` di checkout hanya perlu untuk
-devDeps (`tsc` buat `bun run build`).
+The `fielog` package is not published on the npm registry yet — `bun add fielog` /
+`npm i fielog` 404s today. Until then, use a repo checkout:
+the runtime needs nothing installed besides `bun` itself
+(zero `dependencies`). `bun install` in the checkout is only needed for
+devDeps (`tsc` for `bun run build`).
 
-Yang akan ikut terkirim saat terbit (`files` di `package.json`): `src`, `bin`,
+What ships on publish (`files` in `package.json`): `src`, `bin`,
 `README.md`, `LICENSE`, `CHANGELOG.md`, `docs`.
 
-## coba
+## Try
 
-Dari checkout repo:
+From a repo checkout:
 
 ```sh
 bun bin/fielog.ts demo
 ```
 
-`demo` menjalankan kasir 2 HP offline lalu sync mode tanda dan membuktikan
-total sama di kedua sisi (`bin/fielog.ts:cmdDemo`).
+`demo` runs a 2-phone offline kasir, then signed-mode sync, proving equal
+totals on both sides (`bin/fielog.ts:cmdDemo`).
 
-## file yang lahir saat dipakai
+## Files created at use
 
-`createKernel({ file: 'kasir.db' })` membuat dua file (`src/kernel.ts:logPathFor`):
+`createKernel({ file: 'kasir.db' })` creates two files (`src/kernel.ts:logPathFor`):
 
-| file | isi |
+| file | contents |
 |---|---|
-| `kasir.db` | SQLite read-model, bisa dibuka di DBeaver |
+| `kasir.db` | SQLite read-model, opens in DBeaver |
 | `kasir.log` | JSONL append-only, `tail -f` friendly, fsync per append |
 
-Keduanya harus ikut di-backup / ikut pindah. Lihat [retention](retention.md)
-untuk snapshot + truncate.
+Both must be backed up / moved together. See [retention](retention.md)
+for snapshot + truncate.
 
-Lanjut: [quickstart](quickstart.md).
+Next: [quickstart](quickstart.md).

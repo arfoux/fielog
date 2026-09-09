@@ -1,9 +1,9 @@
 # quickstart
 
-Dua pola runnable: satu HP offline, lalu dua HP sync via relay.
-Semua cuplikan di bawah bisa dicopy jalan apa adanya.
+Two runnable patterns: one phone offline, then two phones syncing via relay.
+Every snippet below runs as-is.
 
-## 1 HP: tulis offline, baca lokal
+## 1 phone: write offline, read locally
 
 ```js
 import { createKernel } from 'fielog';
@@ -11,15 +11,15 @@ import { createKernel } from 'fielog';
 const k = await createKernel({ file: 'kasir.db' });
 await k.append({ type: 'bayar', nominal: 5000, oleh: 'kasir-1' });
 const rows = await k.query('SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0');
-console.log(rows[0].total); // 5000 — state IOU_RECORDED, bukan lunas
+console.log(rows[0].total); // 5000 — IOU_RECORDED state, not settled
 k.close();
 ```
 
-Tanpa jaringan sama sekali: `append`/`query`/`undo` tidak pernah menyentuh
-network (`src/kernel.ts`). Uang offline selalu tercatat sebagai
-`IOU_RECORDED`; `PAID_OFFLINE` / `state` sembarang ditolak `checkAppend`.
+No network at all: `append`/`query`/`undo` never touch the network
+(`src/kernel.ts`). Offline money is always recorded as
+`IOU_RECORDED`; `PAID_OFFLINE` / arbitrary `state` is rejected by `checkAppend`.
 
-## 2 HP: sync nanti via relay lokal (dev, tanpa tanda)
+## 2 phones: sync later via a local relay (dev, unsigned)
 
 ```js
 import { createKernel, WsRelayServer, WsRelayClient } from 'fielog';
@@ -34,7 +34,7 @@ const c2 = new WsRelayClient('ws://127.0.0.1:8091');
 await hp1.sync(c1);
 await hp2.sync(c2);
 const t = await hp2.query('SELECT SUM(nominal) AS total FROM bayar WHERE voided = 0');
-console.log(t[0].total); // 5000 — pindah via relay
+console.log(t[0].total); // 5000 — moved via relay
 c1.close();
 c2.close();
 hp1.close();
@@ -42,25 +42,25 @@ hp2.close();
 server.kill();
 ```
 
-Contoh lengkap 20 transaksi ada di `demo/kasir-2hp.ts`
-(jalan via `bun run demo`).
+The full 20-transaction example is in `demo/kasir-2hp.ts`
+(run via `bun run demo`).
 
-## 2 HP: mode tanda (produksi)
+## 2 phones: signed mode (production)
 
-Relay terbuka hanya untuk dev lokal. Produksi: serve mendaftarkan pubkey
-tiap device, sync membawa token kapabilitas (`bin/fielog.ts`):
+Open relays are for local dev only. Production: serve registers each device's
+pubkey, sync carries a capability token (`bin/fielog.ts`):
 
 ```sh
-# sekali saja: lahirkan kunci device (PEM standar: PRIV PKCS#8, PUB SPKI)
+# one time only: mint the device key (standard PEM: PRIV PKCS#8, PUB SPKI)
 openssl genpkey -algorithm ed25519 -out kasir.priv
 openssl pkey -in kasir.priv -pubout -out kasir.pub
-# terminal 1 — serve jalan terus sampai Ctrl-C:
+# terminal 1 — serve keeps running until Ctrl-C:
 bun bin/fielog.ts serve --port 8091 --file ./relay.log --trust kasir=./kasir.pub
 # terminal 2:
 bun bin/fielog.ts sync --file ./kasir.db --relay ws://127.0.0.1:8091 --key ./kasir.priv --as kasir
 ```
 
-Atau di kode (`src/kernel.ts:capToken`, `src/relay.ts:WsRelayClientOpts`):
+Or in code (`src/kernel.ts:capToken`, `src/relay.ts:WsRelayClientOpts`):
 
 ```js
 import { createKernel, generateDeviceKey, WsRelayServer, WsRelayClient } from 'fielog';
@@ -77,5 +77,5 @@ hp1.close();
 server.kill();
 ```
 
-Lanjut: [arsitektur](architecture.md) untuk peta modul,
-[cli](cli.md) untuk semua flag, [auth](auth.md) untuk model tanda.
+Next: [architecture](architecture.md) for the module map,
+[cli](cli.md) for all flags, [auth](auth.md) for the signing model.

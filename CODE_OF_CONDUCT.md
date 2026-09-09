@@ -1,27 +1,27 @@
 # Code of Conduct
 
-Ringkas dari Contributor Covenant, disesuaikan tim kecil.
+Abridged from Contributor Covenant, adapted for a small team.
 
-## Janji
+## Pledge
 
-Lingkungan bebas pelecehan untuk semua orang, tanpa pandang bulu.
-Berkontribusi = setuju dinilai dari isi kerja, bukan dari siapa yang bicara.
+A harassment-free environment for everyone, no exceptions.
+Contributing = agreeing to be judged on the work, not on who speaks.
 
-## Standar
+## Standards
 
-Baik: bahasa ramah dan inklusif, kritik ke kode bukan ke orang,
-menerima koreksi dengan lapang, fokus ke yang terbaik untuk pengguna.
+Good: friendly and inclusive language, critique the code not the person,
+accept corrections gracefully, focus on what is best for users.
 
-Tidak baik: pelecehan, ujaran merendahkan, serangan pribadi, publikasi
-data pribadi tanpa izin, dan perilaku lain yang membuat orang takut
-berkontribusi.
+Not good: harassment, demeaning speech, personal attacks, publishing
+private data without permission, and any other behavior that scares people
+away from contributing.
 
-## Penegakan
+## Enforcement
 
-Repo solo/small-team: maintainer menangani laporan langsung.
-Lapor via kontak maintainer (lihat [SECURITY](SECURITY.md)).
-Konsekuensi proporsional: teguran → hapus komentar/PR → larangan
-sementara/permanen dari repo.
+Solo/small-team repo: the maintainer handles reports directly.
+Report via maintainer contact (see [SECURITY](SECURITY.md)).
+Proportional consequences: warning → comment/PR removal → temporary/permanent
+repo ban.
 
-Tidak ada dewan etik formal — keputusan maintainer final untuk repo ini,
-dan wajib dijelaskan terbuka bila menyentuh kontribusi orang lain.
+There is no formal ethics board — the maintainer's decision is final for this
+repo, and must be explained openly when it touches someone else's contribution.

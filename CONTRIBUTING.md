@@ -4,40 +4,40 @@
 
 ```sh
 bun install
-bun test            # full suite (218 test saat docs ini ditulis)
+bun test            # full suite (218 tests when this doc was written)
 bun run build       # typecheck via tsc -p tsconfig.json
-bun bin/fielog.ts demo   # smoke end-to-end kasir 2 HP
+bun bin/fielog.ts demo   # end-to-end smoke: 2-phone kasir
 ```
 
-Syarat: `bun` >= 1.0 (lihat [docs/install](docs/install.md)).
+Requires: `bun` >= 1.0 (see [docs/install](docs/install.md)).
 
-## Alur kerja
+## Workflow
 
-1. Baca [docs/architecture](docs/architecture.md) + [docs/contracts](docs/contracts.md)
-   sebelum menyentuh `src/` — kontrak di sana mengikat.
-2. Ubah kode + test yang menjepit perilakunya (satu perilaku = satu test).
-   Klaim docs baru wajib menunjuk file:line kode.
-3. `bun test` file yang tersentuh dulu; full suite + `bun run build`
-   sebelum PR.
-4. Commit kecil, pesan jelas (`<area>: <apa + kenapa>`).
-   Tulis CHANGELOG di bawah `Unreleased` bila perubahan user-visible.
-5. PR: deskripsikan perilaku sebelum/sesudah + bukti run
-   (paste output test/bench yang relevan). Tanpa bukti run = belum siap review.
+1. Read [docs/architecture](docs/architecture.md) + [docs/contracts](docs/contracts.md)
+   before touching `src/` — the contracts there are binding.
+2. Change code + the test pinning its behavior (one behavior = one test).
+   New doc claims must point at code file:line.
+3. `bun test` on touched files first; full suite + `bun run build`
+   before the PR.
+4. Small commits, clear messages (`<area>: <what + why>`).
+   Write a CHANGELOG entry under `Unreleased` for user-visible changes.
+5. PR: describe before/after behavior + run evidence
+   (paste the relevant test/bench output). No run evidence = not ready for review.
 
-## Gaya
+## Style
 
-- Boring dulu: pola yang ada menang atas pola baru. Satu konvensi per file.
-- Fix sumber, bukan gejala: jangan bungkam warning/exception atau
-  special-case input kecuali diminta.
-- Tanpa formatter/linter terpusat — ikuti gaya file yang disentuh.
-- Dilarang: stub/placeholder/`TODO: implement` sebagai "selesai";
-  angka performa hasil karangan (hanya tulis yang diukur — lihat
-  [docs/bench](docs/bench.md)); link docs yang tidak diklik-verifikasi.
+- Boring first: existing patterns beat new ones. One convention per file.
+- Fix the source, not the symptom: never silence warnings/exceptions or
+  special-case input unless asked.
+- No central formatter/linter — follow the style of the file you touch.
+- Forbidden: stub/placeholder/`TODO: implement` as "done";
+  invented perf numbers (write only what you measured — see
+  [docs/bench](docs/bench.md)); doc links you did not click-verify.
 
-## Yang tidak diterima
+## Not accepted
 
-- Perubahan kontrak ([docs/contracts](docs/contracts.md)) tanpa diskusi
-  dulu di issue.
-- Field log baru yang melanggar superset rule ([docs/compat](docs/compat.md)).
-- Test yang mengunci wording/implementasi insidental — test perilaku,
-  bukan plumbing (lihat aturan verifikasi di repo induk bila ada).
+- Contract changes ([docs/contracts](docs/contracts.md)) without prior
+  discussion in an issue.
+- New log fields that break the superset rule ([docs/compat](docs/compat.md)).
+- Tests that lock incidental wording/implementation — test behavior,
+  not plumbing (see the verification rules in the parent repo if any).

@@ -1,8 +1,8 @@
 # retention
 
-Batasi log tanpa kehilangan kebenaran: snapshot + truncate (`src/retain.ts`).
-Hanya prefix yang sudah di-ack (relay sudah memegangnya) yang boleh disapu,
-dan cutover selalu tulis-file-baru + rename atomik.
+Bound the log without losing truth: snapshot + truncate (`src/retain.ts`).
+Only the already-acked prefix (already held by the relay) may be swept,
+and cutover always writes a new file + atomic rename.
 
 ## API (`src/retain.ts`)
 
@@ -11,34 +11,34 @@ interface SnapshotResult { snapshot: string; sealedSeq: number; dbSeq: number }
 interface TruncateResult { removed: number; kept: number; sealedSeq: number }
 snapshotPathFor(dbPath: string): string; // 'kasir.db' -> 'kasir.snapshot.db'
 takeSnapshot(store, dbPath, sealedSeq, dest?): SnapshotResult;
-// Online full copy (VACUUM INTO) + stempel seal di meta snapshot DAN live.
+// Online full copy (VACUUM INTO) + seal stamp in the snapshot AND live meta.
 clampSealToStored(store, logSeqs, sealed, ackSeq): number;
-// Jepit seal ke prefix yang aman disapu (maks = acked & terterapkan).
+// Clamp the seal to the sweep-safe prefix (max = acked & applied).
 sweepLogFile(logPath, sealedSeq, syncDir?): TruncateResult;
-// Sapu baris seq <= sealedSeq. File baru = marker + baris kept; rename atomik.
+// Sweep lines with seq <= sealedSeq. New file = marker + kept lines; atomic rename.
 ```
 
-Via kernel (`src/kernel.ts`): `snapshot(dest?)`, `truncate()`.
-`truncate` no-op bila belum disegel (`sealed <= 0`), dan menutup–membuka
-ulang fd log di `finally` agar kernel tetap usable apapun hasilnya.
-Setelah sapu, replay inkremental suffix kept + `exciseMissing` dengan
-`sealedBelow` (prefix tersapu dimaafkan, karantina tidak).
+Via the kernel (`src/kernel.ts`): `snapshot(dest?)`, `truncate()`.
+`truncate` is a no-op when unsealed (`sealed <= 0`), and reopens the log fd
+in `finally` so the kernel stays usable whatever happens.
+After a sweep, incremental replay of the kept suffix + `exciseMissing` with
+`sealedBelow` (swept prefix forgiven, quarantine not).
 
-## alur pakai
+## Usage flow
 
 ```ts
-await k.snapshot();    // segel prefix acked ke kasir.snapshot.db
-await k.truncate();    // sapu prefix tersegel dari kasir.log
+await k.snapshot();    // seal the acked prefix into kasir.snapshot.db
+await k.truncate();    // sweep the sealed prefix from kasir.log
 ```
 
-Baris pertama log tersapu = marker `fielog-truncate` yang merantai suffix
-ke prefix yang dibuang, jadi `verifyLog` tetap utuh.
+The first line of a swept log = the `fielog-truncate` marker chaining the
+suffix to the discarded prefix, so `verifyLog` stays whole.
 
-## aturan yang mengikat
+## Binding rules
 
-- `seal <= ack`: sweep tidak boleh menghapus data yang belum di-ack atau
-  belum teraplikasi; seal basi = no-op aman (lihat [contracts](contracts.md)).
-- `guardSeal` (lihat [tombstone-engine](tombstone-engine.md)) lebih ketat
-  lagi: tahan event ber-legal-hold dan jangan belah pasangan hide/target.
-- Snapshot ganda yang tumpang-tindih atas db yang sama ditolak loud
-  (`snapshotsInFlight`), bukan di-interleave.
+- `seal <= ack`: a sweep must never delete unacked or unapplied data;
+  a stale seal = safe no-op (see [contracts](contracts.md)).
+- `guardSeal` (see [tombstone-engine](tombstone-engine.md)) is stricter
+  still: hold legal-hold events and never split hide/target pairs.
+- Overlapping double snapshots over the same db are rejected loudly
+  (`snapshotsInFlight`), not interleaved.
