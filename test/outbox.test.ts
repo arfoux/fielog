@@ -27,9 +27,9 @@ describe('bounded outbox', () => {
     const k = await createKernel({ file: join(dir, 'ledger.db'), maxPending: 5 });
     closers.push(() => k.close());
     for (let i = 0; i < 5; i++) {
-      await k.append({ type: 'payment', amount: 1000 + i, actor: 'budi' });
+      await k.append({ type: 'entry', value: 1000 + i, actor: 'budi' });
     }
-    await assert.rejects(k.append({ type: 'payment', amount: 9999, actor: 'budi' }), (err: unknown) => {
+    await assert.rejects(k.append({ type: 'entry', value: 9999, actor: 'budi' }), (err: unknown) => {
       const msg = (err as Error).message;
       assert.match(msg, /ERR_OUTBOX_FULL/);
       assert.match(msg, /cap 5/);
@@ -48,7 +48,7 @@ describe('bounded outbox', () => {
     closers.push(() => k.close());
     const relay = new MemoryRelay();
     for (let i = 0; i < 5; i++) {
-      await k.append({ type: 'payment', amount: 1000 + i, actor: 'budi' });
+      await k.append({ type: 'entry', value: 1000 + i, actor: 'budi' });
     }
     const up = await k.sync(relay, { chunkSize: 2, ...fast });
     assert.equal(up.acked, 5);
@@ -59,17 +59,17 @@ describe('bounded outbox', () => {
     closers.push(() => kb.close());
     const down = await kb.sync(relay, { ...fast });
     assert.equal(down.applied, 5);
-    const got = await kb.query<{ amount: number }>(`SELECT amount FROM payment WHERE voided = 0 ORDER BY seq`);
+    const got = await kb.query<{ value: number }>(`SELECT value FROM entries WHERE voided = 0 ORDER BY seq`);
     assert.deepEqual(
-      got.map((r) => r.amount),
+      got.map((r) => r.value),
       [1000, 1001, 1002, 1003, 1004],
     );
 
     // Outbox open again: appends work, and the next cap names the new oldest seq.
     for (let i = 0; i < 5; i++) {
-      await k.append({ type: 'payment', amount: 2000 + i, actor: 'budi' });
+      await k.append({ type: 'entry', value: 2000 + i, actor: 'budi' });
     }
-    await assert.rejects(k.append({ type: 'payment', amount: 9999, actor: 'budi' }), /ERR_OUTBOX_FULL.*oldest unsynced seq is 6/);
+    await assert.rejects(k.append({ type: 'entry', value: 9999, actor: 'budi' }), /ERR_OUTBOX_FULL.*oldest unsynced seq is 6/);
   });
 
   it('defaults to a 50k cap when no opt is given', async () => {
@@ -78,7 +78,7 @@ describe('bounded outbox', () => {
     const k = await createKernel({ file: join(dir, 'ledger.db') });
     closers.push(() => k.close());
     for (let i = 0; i < 10; i++) {
-      await k.append({ type: 'payment', amount: 10 + i, actor: 'budi' });
+      await k.append({ type: 'entry', value: 10 + i, actor: 'budi' });
     }
     assert.equal(k.health().events, 10);
   });

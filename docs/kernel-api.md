@@ -20,10 +20,10 @@ logPathFor(file: string): string; // 'ledger.db' -> 'ledger.log'
 
 | method | signature | guarantee |
 |---|---|---|
-| append | `append(args: AppendArgs): Promise<LogEvent>` | writes log + fsync, no network. `AppendArgs = { type, payload } \| { type, ...fields, actor? }`. `payment` needs a positive integer `amount`; state only `DRAFT`/`IOU_RECORDED` |
+| append | `append(args: AppendArgs): Promise<LogEvent>` | writes log + fsync, no network. `AppendArgs = { type, payload } \| { type, ...fields, actor? }`. `entry` needs a positive integer `value`; state only `DRAFT`/`RECORDED` |
 | query | `query<T>(sql: string, params?: SqlParams): Promise<T[]>` | reads local SQLite, no network. Named params may be bare (`{id}` becomes `$id`) |
 | undo | `undo(eventId: string, actor?: string): Promise<LogEvent>` | compensation event `undo.compensate`; history is never deleted; blind (the target may not have arrived — see [contracts](contracts.md)) |
-| settle | `settle(eventId: string, 'settled' \| 'failed' \| 'expired', actor?: string): Promise<LogEvent>` | `payment.settled` / `payment.failed` / `payment.expired` |
+| resolve | `resolve(eventId: string, 'resolved' \| 'failed' \| 'expired', actor?: string): Promise<LogEvent>` | `entry.resolved` / `entry.failed` / `entry.expired` |
 | sync | `sync(relay: Relay \| Relay[], opts?: SyncOpts): Promise<PushResult & PullResult & { pushRelay?, pullRelay? }>` | one relay or ordered failover; raw URLs are rejected (needs a `Relay` object with `push`/`pull`) |
 | capToken | `capToken(privateKeyPem: string, scopes? = ['relay:push','relay:pull'], ttlMs? = CAP_TOKEN_TTL_MS): CapToken` | mints this device's capability token |
 | conflicts | `conflicts(): Promise<Record<string, unknown>[]>` | rows `conflicts WHERE status = 'open'` for human reconciliation |
@@ -66,12 +66,12 @@ interface EventStore {
   setMeta(k: string, v: string): void; close(): void;
 }
 checkAppend(type: string, payload: Record<string, unknown>): void; // fail-fast before the log is touched
-MoneyState = { DRAFT, IOU_RECORDED, SETTLED_ONLINE, FAILED, EXPIRED };
+EntryState = { DRAFT, RECORDED, RESOLVED_ONLINE, FAILED, EXPIRED };
 ```
 
-Read schema (`payment`, `stock`, `stock_moves`, `records`, `conflicts`,
+Read schema (`entries`, `stock`, `stock_moves`, `records`, `conflicts`,
 `_events`, `_meta`, `_quarantine`): `src/store.ts:SCHEMA`.
-Honest money: offline = IOU; `SETTLED_ONLINE` only via settle/sync ack.
+Honest money: offline = RECORDED; `RESOLVED_ONLINE` only via resolve/sync ack.
 
 Neighboring modules: [sync-protocol](sync-protocol.md),
 [retention](retention.md), [auth](auth.md).

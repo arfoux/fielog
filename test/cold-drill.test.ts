@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { createKernel } from '../src/kernel.ts';
 
 const N = 30;
-const amount = (i: number): number => 1000 + i;
+const value = (i: number): number => 1000 + i;
 
 describe('cold-drill from primary log only', () => {
   it('rebuilds identical state after deleting everything but ledger.log', async () => {
@@ -22,13 +22,13 @@ describe('cold-drill from primary log only', () => {
     let expected = 0;
     try {
       for (let i = 0; i < N; i++) {
-        expected += amount(i);
-        await seed.append({ type: 'payment', amount: amount(i), actor: 'cold-drill' });
+        expected += value(i);
+        await seed.append({ type: 'entry', value: value(i), actor: 'cold-drill' });
       }
       assert.equal(seed.health().events, N);
       assert.equal(seed.verifyLog().ok, true);
       const before = await seed.query<{ total: number }>(
-        'SELECT SUM(amount) AS total FROM payment WHERE voided = 0',
+        'SELECT SUM(value) AS total FROM entries WHERE voided = 0',
       );
       assert.equal(before[0].total, expected);
     } finally {
@@ -74,7 +74,7 @@ describe('cold-drill from primary log only', () => {
       assert.equal(v.ok, true);
       assert.deepEqual(v.gaps ?? [], []);
       const after = await risen.query<{ total: number }>(
-        'SELECT SUM(amount) AS total FROM payment WHERE voided = 0',
+        'SELECT SUM(value) AS total FROM entries WHERE voided = 0',
       );
       assert.equal(after[0].total, expected);
     } finally {

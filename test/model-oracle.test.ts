@@ -33,12 +33,12 @@ async function runOracle(seed: number): Promise<void> {
       const r = rng();
       let op = '';
       if (r < 0.4 || known.length === 0) {
-        const amount = 100 + Math.floor(rng() * 4900);
+        const value = 100 + Math.floor(rng() * 4900);
         const actor = pick(ACTOR);
-        const ev = await k.append({ type: 'payment', amount, actor });
-        o.payment(ev.id, amount, actor);
+        const ev = await k.append({ type: 'entry', value, actor });
+        o.entry(ev.id, value, actor);
         known.push(ev.id);
-        op = `payment ${ev.id} amount=${amount} actor=${actor}`;
+        op = `entry ${ev.id} value=${value} actor=${actor}`;
       } else if (r < 0.55) {
         const item = pick(ITEMS);
         const qty = 1 + Math.floor(rng() * 20);

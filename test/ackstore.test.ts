@@ -33,10 +33,10 @@ describe('ack implies durable store; truncate never drops unacked/unapplied', ()
     closers.push(() => log.close(), () => store.close());
 
     // Healthy prefix.
-    const e0 = log.append({ type: 'payment', payload: { amount: 100, actor: 'device' } });
+    const e0 = log.append({ type: 'entry', payload: { value: 100, actor: 'device' } });
     store.apply(e0);
     // Crash window from kernel.append: log.append fsynced, store.apply never ran.
-    const lost = log.append({ type: 'payment', payload: { amount: 200, actor: 'device' } });
+    const lost = log.append({ type: 'entry', payload: { value: 200, actor: 'device' } });
     assert.equal(store.hasId(lost.id), false);
 
     const relay = new MemoryRelay();
@@ -57,7 +57,7 @@ describe('ack implies durable store; truncate never drops unacked/unapplied', ()
     store2.replay(log2.readAll());
 
     const rows = store2.query<{ n: number }>(
-      `SELECT COUNT(*) AS n FROM payment WHERE event_id = ?`,
+      `SELECT COUNT(*) AS n FROM entries WHERE event_id = ?`,
       [lost.id],
     );
     assert.equal(rows[0].n, 1, 'acked event missing from store after truncate+reopen: permanent loss');
@@ -81,7 +81,7 @@ describe('ack implies durable store; truncate never drops unacked/unapplied', ()
       },
     });
 
-    log.append({ type: 'payment', payload: { amount: 50, actor: 'device' } });
+    log.append({ type: 'entry', payload: { value: 50, actor: 'device' } });
     const relay = new MemoryRelay();
     const res = await pushPending(log, broken, relay, fast);
     assert.equal(relay.size, 1, 'relay keeps what it was given; only the ack is at issue');
@@ -99,13 +99,13 @@ describe('ack implies durable store; truncate never drops unacked/unapplied', ()
     closers.push(() => k.close());
     const relay = new MemoryRelay();
 
-    for (let i = 0; i < 5; i++) await k.append({ type: 'payment', amount: 100, actor: 'device' });
+    for (let i = 0; i < 5; i++) await k.append({ type: 'entry', value: 100, actor: 'device' });
     const up = await k.sync(relay, fast);
     assert.equal(up.acked, 5);
     await k.snapshot();
 
     // Unacked suffix lands after the seal.
-    for (let i = 0; i < 3; i++) await k.append({ type: 'payment', amount: 7, actor: 'device' });
+    for (let i = 0; i < 3; i++) await k.append({ type: 'entry', value: 7, actor: 'device' });
     const cut = await k.truncate();
     assert.equal(cut.removed, 5);
     assert.equal(cut.kept, 3);
@@ -114,7 +114,7 @@ describe('ack implies durable store; truncate never drops unacked/unapplied', ()
     assert.equal(re.acked, 3, 'truncated-away suffix could never sync');
     assert.equal(relay.size, 8);
     const rows = await k.query<{ n: number; total: number }>(
-      `SELECT COUNT(*) AS n, SUM(amount) AS total FROM payment WHERE voided = 0`,
+      `SELECT COUNT(*) AS n, SUM(value) AS total FROM entries WHERE voided = 0`,
     );
     assert.deepEqual(rows[0], { n: 8, total: 5 * 100 + 3 * 7 });
   });

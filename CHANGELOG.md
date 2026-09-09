@@ -13,8 +13,8 @@ Untagged commits are folded into the next tag that shipped them.
 - Bench smoke 2026-09-09 `bun bench/bench-append.ts 200` = 306
   appends/sec, p50 3.07 ms, p99 7.63 ms; full numbers in `docs/bench.md`.
 - Typecheck clean: `PushResult` exported, relay rng field, cas writeSync narrowing.
-- 30 audit suspects fixed: relay fail-closed persist (no ack for unwritten events, ack only stored ids), store seq-vs-id collision no longer swallowed, fractional amount rejected, sync dead-letter cursors (one poison event never pins push/pull), retain empty-guard returns 0, revokelog convergent tie-break, tombstone guard covers show/target, quota remaining clamped, canonical payload key order, duplicate-id append rejected, seq-gap verification, device mismatch throws (first-explicit adoption allowed), threshold misconfig throws, cas orphan sweep + EEXIST tolerance + fstat + guarded quarantine, deltasync real dead-letter list + honest fetched metric.
-- Kernel split healing is O(1) steady-state (suspect flag + open-time replay); undo/settle stay blind compensators (peer targets may sync later — model-oracle pins this).
+- 30 audit suspects fixed: relay fail-closed persist (no ack for unwritten events, ack only stored ids), store seq-vs-id collision no longer swallowed, fractional value rejected, sync dead-letter cursors (one poison event never pins push/pull), retain empty-guard returns 0, revokelog convergent tie-break, tombstone guard covers show/target, quota remaining clamped, canonical payload key order, duplicate-id append rejected, seq-gap verification, device mismatch throws (first-explicit adoption allowed), threshold misconfig throws, cas orphan sweep + EEXIST tolerance + fstat + guarded quarantine, deltasync real dead-letter list + honest fetched metric.
+- Kernel split healing is O(1) steady-state (suspect flag + open-time replay); undo/resolve stay blind compensators (peer targets may sync later — model-oracle pins this).
 - Perf: relay liveBuf dedupes via persistent Set, token verdicts cached per revoke size; `purgeRevoked` incremental via `sync.purge_seq` cursor + fingerprint; backoff jitter deterministic by default (opt-in random).
 - Suite: 218 tests green, tsc clean.
 
@@ -23,7 +23,7 @@ Untagged commits are folded into the next tag that shipped them.
 
 - Initial release: offline-first `createKernel({ file })` with `append` / `query` / `undo`, no network needed for local writes.
 - Append-only JSONL log with a sha256 hash chain per event (`GENESIS` anchor, `tail -f` friendly).
-- SQLite read-model via `bun:sqlite` (plain SQLite file, opens in external tools); money honesty rule (offline money is an IOU, settlement needs online ack) and fail-fast `checkAppend` so rejected writes leave no log line behind.
+- SQLite read-model via `bun:sqlite` (plain SQLite file, opens in external tools); money honesty rule (offline money is only RECORDED, resolution needs online ack) and fail-fast `checkAppend` so rejected writes leave no log line behind.
 - Device identity: per-device keypairs, event signing/verification, scope grants, countersignatures with threshold check, revocation list.
 - Sync core: `MemoryRelay`, `pushPending` / `pullRemote` / `syncKernel` with ack-cursor resume and backoff; open conflicts queryable via `kernel.conflicts()`; `undo` as compensating events.
 
@@ -71,7 +71,7 @@ Untagged commits are folded into the next tag that shipped them.
 
 - Poison pull events are quarantined instead of wedging sync in a livelock; the cursor advances past them.
 - Pull events whose origin signature does not verify against the trusted device key are rejected.
-- `undo` (and `settle`) targeting an event that has not arrived yet parks and resurrects: the compensation applies once the target arrives late instead of being lost.
+- `undo` (and `resolve`) targeting an event that has not arrived yet parks and resurrects: the compensation applies once the target arrives late instead of being lost.
 
 ## v0.10.0 — ack implies stored
 

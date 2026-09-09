@@ -1,6 +1,6 @@
 // bench/bench-query.ts — query p50/p99 over a 100k-event read-model.
 // run: bun bench/bench-query.ts [N]   (default 100000)
-// workloads: full-table aggregate (SUM over payment) and indexed point lookup by seq.
+// workloads: full-table aggregate (SUM over entry) and indexed point lookup by seq.
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,7 +15,7 @@ const kernel = await createKernel({ file: join(dir, 'bench.db'), maxPending: N +
 
 const t0 = performance.now();
 for (let i = 0; i < N; i++) {
-  await kernel.append({ type: 'payment', amount: 1000 + (i % 9000), actor: 'bench' });
+  await kernel.append({ type: 'entry', value: 1000 + (i % 9000), actor: 'bench' });
   if ((i + 1) % 10_000 === 0) console.log(`build: ${i + 1}/${N}`);
 }
 console.log(`build: ${N} events in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
@@ -34,9 +34,9 @@ async function measure(label: string, fn: (i: number) => Promise<unknown>): Prom
 }
 
 await measure('sum_all', () =>
-  kernel.query(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`),
+  kernel.query(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`),
 );
 await measure('point_by_seq', (i) =>
-  kernel.query(`SELECT * FROM payment WHERE seq = ?`, [(i * 7919) % N + 1]),
+  kernel.query(`SELECT * FROM entries WHERE seq = ?`, [(i * 7919) % N + 1]),
 );
 kernel.close();

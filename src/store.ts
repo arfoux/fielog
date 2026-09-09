@@ -47,21 +47,21 @@ function openDb(path: string): Db {
   };
 }
 
-// Money honesty: offline money is an IOU, never payment.
-export const MoneyState = {
+// Entry honesty: an offline entry is a promise, never resolved until acked.
+export const EntryState = {
   DRAFT: 'DRAFT',
-  IOU_RECORDED: 'IOU_RECORDED', // recorded locally, NOT paid
-  SETTLED_ONLINE: 'SETTLED_ONLINE', // only via settle/sync ack
+  RECORDED: 'RECORDED', // recorded locally, NOT resolved
+  RESOLVED_ONLINE: 'RESOLVED_ONLINE', // only via resolve/sync ack
   FAILED: 'FAILED',
   EXPIRED: 'EXPIRED',
 } as const;
-export type MoneyState = (typeof MoneyState)[keyof typeof MoneyState];
+export type EntryState = (typeof EntryState)[keyof typeof EntryState];
 
-const MONEY_APPEND_STATES: Record<string, true> = { [MoneyState.DRAFT]: true, [MoneyState.IOU_RECORDED]: true };
+const ENTRY_APPEND_STATES: Record<string, true> = { [EntryState.DRAFT]: true, [EntryState.RECORDED]: true };
 const TERMINAL_STATES: Record<string, true> = {
-  [MoneyState.SETTLED_ONLINE]: true,
-  [MoneyState.FAILED]: true,
-  [MoneyState.EXPIRED]: true,
+  [EntryState.RESOLVED_ONLINE]: true,
+  [EntryState.FAILED]: true,
+  [EntryState.EXPIRED]: true,
 };
 /**
  * Fail-fast input validation. Kernel runs this BEFORE touching the log so a
@@ -69,15 +69,15 @@ const TERMINAL_STATES: Record<string, true> = {
  */
 export function checkAppend(type: string, payload: Record<string, unknown>): void {
   const p = payload ?? {};
-  if (type === 'payment') {
-    const amount = Number(p['amount']);
-    if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount <= 0) {
-      throw new Error(`payment rejected: amount must be a positive integer (got ${String(p['amount'])})`);
+  if (type === 'entry') {
+    const value = Number(p['value']);
+    if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+      throw new Error(`entry rejected: value must be a positive integer (got ${String(p['value'])})`);
     }
-    const state = String(p['state'] ?? MoneyState.IOU_RECORDED);
-    if (!MONEY_APPEND_STATES[state]) {
+    const state = String(p['state'] ?? EntryState.RECORDED);
+    if (!ENTRY_APPEND_STATES[state]) {
       throw new Error(
-        `payment rejected: state '${state}' cannot be recorded offline (use DRAFT or IOU_RECORDED; settlement needs online ack)`,
+        `entry rejected: state '${state}' cannot be recorded offline (use DRAFT or RECORDED; resolution needs online ack)`,
       );
     }
   } else if (type === 'stock.add') {
@@ -111,10 +111,10 @@ CREATE TABLE IF NOT EXISTS _events(
   prev_hash TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS _meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS payment(
+CREATE TABLE IF NOT EXISTS entries(
   seq INTEGER PRIMARY KEY,
   event_id TEXT UNIQUE NOT NULL,
-  amount INTEGER NOT NULL,
+  value INTEGER NOT NULL,
   actor TEXT,
   state TEXT NOT NULL,
   voided INTEGER NOT NULL DEFAULT 0
@@ -228,7 +228,7 @@ export function openStore(path: string): EventStore {
   }
 
   // Reorder resurrection: an undo/transition that arrived before its target
-  // parks in records (undo) or conflicts (unknown-payment). When the target
+  // parks in records (undo) or conflicts (unknown-entry). When the target
   // lands later, re-resolve here so voided/state converge regardless of order.
   function resolvePendingUndos(target: string): void {
     const rows = all<{ event_id: string; body: string }>(
@@ -243,9 +243,9 @@ export function openStore(path: string): EventStore {
         continue;
       }
       if (reverses !== target) continue;
-      const b = all<{ seq: number }>(db, `SELECT seq FROM payment WHERE event_id = ?`, target);
+      const b = all<{ seq: number }>(db, `SELECT seq FROM entries WHERE event_id = ?`, target);
       if (b.length) {
-        run(db, `UPDATE payment SET voided = 1 WHERE event_id = ?`, target);
+        run(db, `UPDATE entries SET voided = 1 WHERE event_id = ?`, target);
         continue;
       }
       const m = all<{ item: string; qty: number; voided: number }>(
@@ -266,10 +266,10 @@ export function openStore(path: string): EventStore {
     }
   }
 
-  function resolvePendingPayments(target: string): void {
+  function resolvePendingEntries(target: string): void {
     const open = all<{ id: string; event_ids: string }>(
       db,
-      `SELECT id, event_ids FROM conflicts WHERE kind = 'unknown-payment' AND status = 'open'`,
+      `SELECT id, event_ids FROM conflicts WHERE kind = 'unknown-entry' AND status = 'open'`,
     );
     const cands: Array<{ id: string; type: string; seq: number; conflictId: string }> = [];
     for (const c of open) {
@@ -298,23 +298,23 @@ export function openStore(path: string): EventStore {
     }
     cands.sort((a, b) => a.seq - b.seq);
     for (const t of cands) {
-      const rows = all<{ state: string }>(db, `SELECT state FROM payment WHERE event_id = ?`, target);
+      const rows = all<{ state: string }>(db, `SELECT state FROM entries WHERE event_id = ?`, target);
       if (!rows.length) continue;
       if (TERMINAL_STATES[rows[0].state]) {
-        // Target landed terminal already: morph into a double-settle for humans.
-        run(db, `UPDATE conflicts SET kind = 'double-settle', detail = ?, event_ids = ? WHERE id = ?`,
-          `${t.type} on already-terminal payment ${target} (${rows[0].state})`,
+        // Target landed terminal already: morph into a double-resolve for humans.
+        run(db, `UPDATE conflicts SET kind = 'double-resolve', detail = ?, event_ids = ? WHERE id = ?`,
+          `${t.type} on already-terminal entry ${target} (${rows[0].state})`,
           JSON.stringify([target, t.id]),
           t.conflictId);
         continue;
       }
       const next =
-        t.type === 'payment.settled'
-          ? MoneyState.SETTLED_ONLINE
-          : t.type === 'payment.failed'
-            ? MoneyState.FAILED
-            : MoneyState.EXPIRED;
-      run(db, `UPDATE payment SET state = ? WHERE event_id = ?`, next, target);
+        t.type === 'entry.resolved'
+          ? EntryState.RESOLVED_ONLINE
+          : t.type === 'entry.failed'
+            ? EntryState.FAILED
+            : EntryState.EXPIRED;
+      run(db, `UPDATE entries SET state = ? WHERE event_id = ?`, next, target);
       run(db, `UPDATE conflicts SET status = 'resolved' WHERE id = ?`, t.conflictId);
     }
   }
@@ -322,53 +322,53 @@ export function openStore(path: string): EventStore {
   function route(ev: LogEvent): void {
     const p = ev.payload as Record<string, unknown>;
     switch (ev.type) {
-      case 'payment': {
+      case 'entry': {
         checkAppend(ev.type, p);
-        const amount = Number(p['amount']);
-        const state = String(p['state'] ?? MoneyState.IOU_RECORDED);
+        const value = Number(p['value']);
+        const state = String(p['state'] ?? EntryState.RECORDED);
         run(
           db,
-          `INSERT INTO payment(seq,event_id,amount,actor,state,voided) VALUES(?,?,?,?,?,0)`,
+          `INSERT INTO entries(seq,event_id,value,actor,state,voided) VALUES(?,?,?,?,?,0)`,
           ev.seq,
           ev.id,
-          amount,
+          value,
           (p['actor'] as string) ?? (ev.actor as string) ?? null,
           state,
         );
         // Target landed after its undo/transition parked: resurrect them now.
         resolvePendingUndos(ev.id);
-        resolvePendingPayments(ev.id);
+        resolvePendingEntries(ev.id);
         break;
       }
-      case 'payment.settled':
-      case 'payment.failed':
-      case 'payment.expired': {
+      case 'entry.resolved':
+      case 'entry.failed':
+      case 'entry.expired': {
         const target = String(p['event_id'] ?? p['reverses'] ?? '');
         const rows = all<{ state: string; voided: number }>(
           db,
-          `SELECT state, voided FROM payment WHERE event_id = ?`,
+          `SELECT state, voided FROM entries WHERE event_id = ?`,
           target,
         );
         if (rows.length === 0) {
-          addConflict('unknown-payment', `transition ${ev.type} references unknown payment ${target}`, [ev.id]);
+          addConflict('unknown-entry', `transition ${ev.type} references unknown entry ${target}`, [ev.id]);
           break;
         }
         if (TERMINAL_STATES[rows[0].state]) {
-          // Double-settle / settle-after-fail: human must reconcile, never LWW.
+          // Double-resolve / resolve-after-fail: human must reconcile, never LWW.
           addConflict(
-            'double-settle',
-            `${ev.type} on already-terminal payment ${target} (${rows[0].state})`,
+            'double-resolve',
+            `${ev.type} on already-terminal entry ${target} (${rows[0].state})`,
             [target, ev.id],
           );
           break;
         }
         const next =
-          ev.type === 'payment.settled'
-            ? MoneyState.SETTLED_ONLINE
-            : ev.type === 'payment.failed'
-              ? MoneyState.FAILED
-              : MoneyState.EXPIRED;
-        run(db, `UPDATE payment SET state = ? WHERE event_id = ?`, next, target);
+          ev.type === 'entry.resolved'
+            ? EntryState.RESOLVED_ONLINE
+            : ev.type === 'entry.failed'
+              ? EntryState.FAILED
+              : EntryState.EXPIRED;
+        run(db, `UPDATE entries SET state = ? WHERE event_id = ?`, next, target);
         break;
       }
       case 'stock.add': {
@@ -409,9 +409,9 @@ export function openStore(path: string): EventStore {
       }
       case 'undo.compensate': {
         const target = String(p['reverses'] ?? '');
-        const b = all<{ seq: number }>(db, `SELECT seq FROM payment WHERE event_id = ?`, target);
+        const b = all<{ seq: number }>(db, `SELECT seq FROM entries WHERE event_id = ?`, target);
         if (b.length) {
-          run(db, `UPDATE payment SET voided = 1 WHERE event_id = ?`, target);
+          run(db, `UPDATE entries SET voided = 1 WHERE event_id = ?`, target);
           break;
         }
         const m = all<{ item: string; qty: number; voided: number }>(
@@ -464,7 +464,7 @@ export function openStore(path: string): EventStore {
           Date.now(),
           raw.length ? JSON.stringify(raw[0]) : r.id,
         );
-        run(db, `DELETE FROM payment WHERE event_id = ?`, r.id);
+        run(db, `DELETE FROM entries WHERE event_id = ?`, r.id);
         const m = all<{ n: number }>(db, `SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = ?`, r.id);
         run(db, `DELETE FROM stock_moves WHERE event_id = ?`, r.id);
         run(db, `DELETE FROM records WHERE event_id = ?`, r.id);
@@ -551,7 +551,7 @@ export function openStore(path: string): EventStore {
       try {
         let moves = 0;
         for (const g of gone) {
-          run(db, `DELETE FROM payment WHERE event_id = ?`, g.id);
+          run(db, `DELETE FROM entries WHERE event_id = ?`, g.id);
           const m = all<{ n: number }>(db, `SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = ?`, g.id);
           if (m[0]?.n) moves += 1;
           run(db, `DELETE FROM stock_moves WHERE event_id = ?`, g.id);

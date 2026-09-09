@@ -15,10 +15,10 @@ function mkEv(id: string): LogEvent {
   return {
     id,
     seq,
-    type: 'payment',
+    type: 'entry',
     device_id: 'device-test',
     ts_device: Date.now(),
-    payload: { amount: 100 },
+    payload: { value: 100 },
     prev_hash: 'GENESIS',
     hash: `hash-${id}`,
   };

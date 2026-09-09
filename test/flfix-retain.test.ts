@@ -17,7 +17,7 @@ function seedEvents(store: EventStore, seqs: number[]): void {
   for (const s of seqs) {
     store.exec(
       `INSERT INTO _events(seq,id,type,device_id,ts_device,payload,hash,prev_hash) ` +
-        `VALUES(${s},'id-${s}','payment','d1',${s},'{}','h${s}','h${s - 1}')`,
+        `VALUES(${s},'id-${s}','entry','d1',${s},'{}','h${s}','h${s - 1}')`,
     );
   }
 }

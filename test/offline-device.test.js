@@ -1,5 +1,5 @@
 // Offline device flow: 80 transactions appended with NO relay/network,
-// totals served from the local read-model, money stuck at IOU_RECORDED.
+// totals served from the local read-model, money stuck at RECORDED.
 import { describe, it, beforeAll, afterAll } from 'bun:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
@@ -19,23 +19,23 @@ describe('offline device flow', () => {
   it('appends 80 tx offline and queries totals locally', async () => {
     let expected = 0;
     for (let i = 0; i < 80; i++) {
-      const amount = 10000 + i * 500;
-      expected += amount;
-      await k.append({ type: 'payment', amount, actor: `device-${i % 3}` });
+      const value = 10000 + i * 500;
+      expected += value;
+      await k.append({ type: 'entry', value, actor: `device-${i % 3}` });
     }
-    const rows = await k.query(`SELECT SUM(amount) AS total, COUNT(*) AS n FROM payment WHERE voided = 0`);
+    const rows = await k.query(`SELECT SUM(value) AS total, COUNT(*) AS n FROM entries WHERE voided = 0`);
     assert.equal(rows[0].n, 80);
     assert.equal(rows[0].total, expected);
   });
 
-  it('money stays IOU_RECORDED — never paid offline', async () => {
-    const states = await k.query(`SELECT DISTINCT state FROM payment`);
-    assert.deepEqual(states.map((r) => r.state), ['IOU_RECORDED']);
+  it('money stays RECORDED — never paid offline', async () => {
+    const states = await k.query(`SELECT DISTINCT state FROM entries`);
+    assert.deepEqual(states.map((r) => r.state), ['RECORDED']);
   });
 
   it('rejects PAID_OFFLINE outright', async () => {
     await assert.rejects(
-      k.append({ type: 'payment', payload: { amount: 50000, actor: 'x', state: 'PAID_OFFLINE' } }),
+      k.append({ type: 'entry', payload: { value: 50000, actor: 'x', state: 'PAID_OFFLINE' } }),
       /cannot be recorded offline/,
     );
   });

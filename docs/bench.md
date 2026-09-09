@@ -14,18 +14,18 @@ machine — no estimates. Re-run with `bun bench/bench-*.ts [N]`
 
 ## method
 
-- `bench/bench-append.ts [N]` (default 5000): appends `payment` events
-  (`amount` 1000..9999, `actor: bench`) to a fresh tmp kernel, times the
+- `bench/bench-append.ts [N]` (default 5000): appends `entry` events
+  (`value` 1000..9999, `actor: bench`) to a fresh tmp kernel, times the
   whole run plus each append for per-op p50/p99.
-- `bench/bench-query.ts [N]` (default 100000): builds N `payment` events,
+- `bench/bench-query.ts [N]` (default 100000): builds N `entry` events,
   then 200 timed iterations (10 warmup) of two workloads against the
-  SQLite read-model: `sum_all` (`SELECT SUM(amount) ... WHERE voided = 0`)
-  and `point_by_seq` (`SELECT * FROM payment WHERE seq = ?`, deterministic
+  SQLite read-model: `sum_all` (`SELECT SUM(value) ... WHERE voided = 0`)
+  and `point_by_seq` (`SELECT * FROM entries WHERE seq = ?`, deterministic
   stride `(i * 7919) % N + 1` covering each seq once per full cycle).
   `maxPending` is raised to N + 1000 so the outbox cap does not stop the build.
 - `bench/bench-sync.ts [N]` (default 10000): device A appends N events,
   pushes to a real `WsRelayServer` over ws (`chunkSize: 500`), then a fresh
-  device B pulls all N. Correctness is checked (`SUM(amount)` equal on both
+  device B pulls all N. Correctness is checked (`SUM(value)` equal on both
   sides, `applied == N`); push, pull, and end-to-end rates are reported.
 
 ## results

@@ -55,7 +55,7 @@ describe('ws relay', () => {
     let expected = 0;
     for (let i = 0; i < 10; i++) {
       expected += 1000 + i;
-      await ka.append({ type: 'payment', amount: 1000 + i, actor: 'budi' });
+      await ka.append({ type: 'entry', value: 1000 + i, actor: 'budi' });
     }
     const up = await ka.sync(ca, { chunkSize: 5, ...fast });
     assert.equal(up.acked, 10);
@@ -64,7 +64,7 @@ describe('ws relay', () => {
     await waitFor(() => cb.liveCount >= 10);
     const down = await kb.sync(cb, { ...fast });
     assert.equal(down.applied, 10);
-    const rows = await kb.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+    const rows = await kb.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
     assert.equal(rows[0].total, expected);
 
     await waitFor(() => ca.pingsReceived > 0 && server.pongsReceived > 0);
@@ -82,7 +82,7 @@ describe('ws relay', () => {
     const client = new WsRelayClient(`ws://127.0.0.1:${port}`, { ...fast });
     closers.push(() => client.close());
     for (let i = 0; i < 30; i++) {
-      await k.append({ type: 'payment', amount: 500 + i, actor: 'ani' });
+      await k.append({ type: 'entry', value: 500 + i, actor: 'ani' });
     }
     await assert.rejects(k.sync(client, { chunkSize: 5, maxRetries: 3, ...fast }), /dropped|failed|refused|closed|timeout/);
     assert.ok(k.ackSeq() < 30); // cursor stuck where the ack stopped
@@ -112,7 +112,7 @@ describe('ws relay', () => {
     const client = new WsRelayClient(`ws://127.0.0.1:${port}`, { ...fast, maxRetries: 30 });
     closers.push(() => client.close());
     for (let i = 0; i < 20; i++) {
-      await k.append({ type: 'payment', amount: 200 + i, actor: 'chaos' });
+      await k.append({ type: 'entry', value: 200 + i, actor: 'chaos' });
     }
     await k.sync(client, { chunkSize: 4, maxRetries: 40, ...fast });
     assert.equal(k.ackSeq(), 20);

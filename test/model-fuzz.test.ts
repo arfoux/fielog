@@ -1,5 +1,5 @@
 // model-fuzz: in-memory oracle vs kernel over 5000 seeded mixed ops.
-// ops (applied identically to both): append payment, stock.add/sell, undo,
+// ops (applied identically to both): append entry, stock.add/sell, undo,
 // kill-respawn, sync, replay. state compared every 100 steps: per-actor live
 // sums + stock qty per item + full voided id set vs SELECT SUM/voided.
 // mismatch fails loudly with seed + step + op log. MemoryRelay only.
@@ -12,16 +12,16 @@ import { createKernel, type Kernel } from '../src/kernel.ts';
 import { MemoryRelay } from '../src/sync.ts';
 import { mulberry32 } from '../src/relay.ts';
 
-// oracle: plain-arithmetic mirror of store.ts routing (payment/stock/undo only).
+// oracle: plain-arithmetic mirror of store.ts routing (entry/stock/undo only).
 class Oracle {
-  pay = new Map<string, number>(); // actor -> live amount sum
-  nom = new Map<string, number>(); // payment id -> amount
-  who = new Map<string, string>(); // payment id -> actor
+  pay = new Map<string, number>(); // actor -> live value sum
+  nom = new Map<string, number>(); // entry id -> value
+  who = new Map<string, string>(); // entry id -> actor
   stk = new Map<string, number>(); // item -> qty on hand
   mov = new Map<string, { i: string; q: number }>(); // live stock move -> signed qty
-  void = new Set<string>(); // voided payment + stock ids (oversell parks included)
+  void = new Set<string>(); // voided entry + stock ids (oversell parks included)
   pend = new Set<string>(); // undo targets not yet seen (records-parked)
-  payment(id: string, n: number, o: string): void {
+  entry(id: string, n: number, o: string): void {
     this.nom.set(id, n); this.who.set(id, o);
     if (this.pend.has(id)) { this.void.add(id); this.pend.delete(id); return; }
     this.pay.set(o, (this.pay.get(o) ?? 0) + n);
@@ -63,12 +63,12 @@ function norm(m: Map<string, number>): Map<string, number> {
 async function check(seed: number, step: number, op: string, k: Kernel, o: Oracle, log: string[]): Promise<void> {
   const ctx = `seed=${seed} step=${step} op=${op}`;
   const payRows = await k.query<{ actor: string; t: number }>(
-    `SELECT actor, SUM(amount) AS t FROM payment WHERE voided = 0 GROUP BY actor`);
+    `SELECT actor, SUM(value) AS t FROM entries WHERE voided = 0 GROUP BY actor`);
   const pay = new Map(payRows.map((r) => [String(r.actor), Number(r.t)] as [string, number]));
   const stockRows = await k.query<{ item: string; qty: number }>(`SELECT item, qty FROM stock`);
   const stk = new Map(stockRows.map((r) => [String(r.item), Number(r.qty)] as [string, number]));
   const voidRows = await k.query<{ event_id: string }>(
-    `SELECT event_id FROM payment WHERE voided = 1 UNION ALL SELECT event_id FROM stock_moves WHERE voided = 1`);
+    `SELECT event_id FROM entries WHERE voided = 1 UNION ALL SELECT event_id FROM stock_moves WHERE voided = 1`);
   const tail = log.slice(-80).join('\n');
   const loud = (what: string, exp: unknown, got: unknown) =>
     `${ctx} MISMATCH ${what}\nexpected=${JSON.stringify(exp)}\nactual=${JSON.stringify(got)}\n--- last ops ---\n${tail}`;
@@ -94,12 +94,12 @@ async function runFuzz(seed: number): Promise<void> {
       const r = rng();
       let op = '';
       if (r < 0.4 || known.length === 0) {
-        const amount = 100 + Math.floor(rng() * 4900);
+        const value = 100 + Math.floor(rng() * 4900);
         const actor = pick(ACTOR);
-        const ev = await k.append({ type: 'payment', amount, actor });
-        o.payment(ev.id, amount, actor);
+        const ev = await k.append({ type: 'entry', value, actor });
+        o.entry(ev.id, value, actor);
         known.push(ev.id);
-        op = `payment ${ev.id} amount=${amount} actor=${actor}`;
+        op = `entry ${ev.id} value=${value} actor=${actor}`;
       } else if (r < 0.52) {
         const item = pick(ITEMS);
         const qty = 1 + Math.floor(rng() * 20);

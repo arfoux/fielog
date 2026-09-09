@@ -9,7 +9,7 @@ the revoke arrived.
 
 Quarantine closes ACCESS and keeps EVIDENCE. It never rewrites or deletes
 the append-only log: the tainted bytes stay on disk (log line) and in
-`_events`, while the domain read views (`payment`, `stock_moves`, `records`)
+`_events`, while the domain read views (`entries`, `stock_moves`, `records`)
 stop serving them. Forensics reads `_quarantine`; humans read the views.
 
 ## api (`src/sync.ts`)

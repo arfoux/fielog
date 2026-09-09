@@ -64,8 +64,8 @@ export interface Kernel {
   append(args: AppendArgs): Promise<LogEvent>;
   query<T = Record<string, unknown>>(sql: string, params?: SqlParams): Promise<T[]>;
   undo(eventId: string, actor?: string): Promise<LogEvent>;
-  /** Settle an IOU: 'settled' needs online ack; failed/expired record locally. */
-  settle(eventId: string, outcome: 'settled' | 'failed' | 'expired', actor?: string): Promise<LogEvent>;
+  /** Resolve an IOU: 'resolved' needs online ack; failed/expired record locally. */
+  resolve(eventId: string, outcome: 'resolved' | 'failed' | 'expired', actor?: string): Promise<LogEvent>;
   /** Sync via one relay, or fail over across a list in order (sticks to first healthy). */
   sync(relay: Relay | Relay[], opts?: SyncOpts): Promise<PushResult & PullResult & { pushRelay?: number; pullRelay?: number }>;
   /** Mint a relay capability token for this kernel's deviceId with a device private key. */
@@ -92,7 +92,7 @@ function toAppendInput(args: AppendArgs, deviceId: string, clock: () => number):
     payload?: Record<string, unknown>;
   } & Record<string, unknown>;
   if (!type) throw new Error('append: type is required');
-  // Shorthand (README): append({type:'payment', amount, actor}) → payload.
+  // Shorthand (README): append({type:'entry', value, actor}) → payload.
   // Explicit: append({type, payload}) — extra keys merge under payload.
   const { device_id: _d, id: _i, ts_device: _t, ...clean } = rest;
   void _d;
@@ -212,8 +212,8 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
       // not yet synced here. Convergence is by fold, not by local existence.
       return serialize(() => appendInner({ type: 'undo.compensate', payload: { reverses: eventId }, actor }));
     },
-    settle: async (eventId, outcome, actor) => {
-      const type = outcome === 'settled' ? 'payment.settled' : outcome === 'failed' ? 'payment.failed' : 'payment.expired';
+    resolve: async (eventId, outcome, actor) => {
+      const type = outcome === 'resolved' ? 'entry.resolved' : outcome === 'failed' ? 'entry.failed' : 'entry.expired';
       return serialize(() => appendInner({ type, payload: { event_id: eventId }, actor }));
     },
     sync: (relay, syncOpts) => {

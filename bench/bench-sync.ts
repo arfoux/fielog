@@ -1,7 +1,7 @@
 // bench/bench-sync.ts — sync throughput (events/sec) over a real ws relay.
 // run: bun bench/bench-sync.ts [N]   (default 10000)
 // device A appends N events, pushes to the relay; fresh device B pulls them.
-// chunkSize 500; correctness checked by comparing SUM(amount) on both sides.
+// chunkSize 500; correctness checked by comparing SUM(value) on both sides.
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -19,9 +19,9 @@ const port = await server.start();
 const ka = await createKernel({ file: join(dir, 'a.db') });
 let expected = 0;
 for (let i = 0; i < N; i++) {
-  const amount = 1000 + (i % 9000);
-  expected += amount;
-  await ka.append({ type: 'payment', amount, actor: 'bench' });
+  const value = 1000 + (i % 9000);
+  expected += value;
+  await ka.append({ type: 'entry', value, actor: 'bench' });
 }
 
 const ca = new WsRelayClient(`ws://127.0.0.1:${port}`, { ...fast });
@@ -35,7 +35,7 @@ const tPull = performance.now();
 const down = await kb.sync(cb, { chunkSize: CHUNK, ...fast });
 const pullSecs = (performance.now() - tPull) / 1000;
 
-const rows = await kb.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+const rows = await kb.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
 if (rows[0].total !== expected) throw new Error(`total mismatch: got=${rows[0].total} want=${expected}`);
 if (down.applied !== N) throw new Error(`applied mismatch: got=${down.applied} want=${N}`);
 

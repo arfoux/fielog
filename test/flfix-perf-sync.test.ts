@@ -24,16 +24,16 @@ function pair(name: string, device = 'evil'): { dir: string; log: AppendLog; sto
   return { dir, log, store, close: () => { log.close(); store.close(); } };
 }
 
-function appendPayment(log: AppendLog, store: EventStore, amount: number, deviceId?: string): LogEvent {
-  const ev = log.append({ type: 'payment', payload: { amount, actor: 'device' }, device_id: deviceId });
+function appendEntry(log: AppendLog, store: EventStore, value: number, deviceId?: string): LogEvent {
+  const ev = log.append({ type: 'entry', payload: { value, actor: 'device' }, device_id: deviceId });
   store.apply(ev);
   return ev;
 }
 
-function relayPayment(id: string, seq: number, device: string, amount: number): LogEvent {
+function relayEntry(id: string, seq: number, device: string, value: number): LogEvent {
   return {
-    id, seq, type: 'payment', actor: device, device_id: device, ts_device: seq,
-    payload: { amount, actor: device }, prev_hash: 'GENESIS', hash: `h-${id}`,
+    id, seq, type: 'entry', actor: device, device_id: device, ts_device: seq,
+    payload: { value, actor: device }, prev_hash: 'GENESIS', hash: `h-${id}`,
   };
 }
 
@@ -41,16 +41,16 @@ describe('flfix-perf-sync', () => {
   it('purgeRevoked scans only the new suffix under stable revoke state', () => {
     const { log, store, close } = pair('fielog-perf-sync-');
     try {
-      for (let i = 0; i < 3; i++) appendPayment(log, store, 100 + i);
+      for (let i = 0; i < 3; i++) appendEntry(log, store, 100 + i);
       const first = purgeRevoked(log, store, { revokedDevices: new Set(['evil']) });
       assert.deepEqual(first, { scanned: 3, quarantined: 3 });
       assert.equal(getPurgeSeq(store), log.maxSeq());
-      assert.deepEqual(store.query(`SELECT event_id FROM payment`), []);
+      assert.deepEqual(store.query(`SELECT event_id FROM entries`), []);
       // Steady state: same revoke set, nothing new — no rescan.
       const second = purgeRevoked(log, store, { revokedDevices: new Set(['evil']) });
       assert.deepEqual(second, { scanned: 0, quarantined: 0 });
       // New suffix only, across Set/array shapes of the same set.
-      for (let i = 0; i < 2; i++) appendPayment(log, store, 200 + i);
+      for (let i = 0; i < 2; i++) appendEntry(log, store, 200 + i);
       const third = purgeRevoked(log, store, { revokedDevices: ['evil'] });
       assert.deepEqual(third, { scanned: 2, quarantined: 2 });
       assert.equal(getPurgeSeq(store), log.maxSeq());
@@ -61,7 +61,7 @@ describe('flfix-perf-sync', () => {
 
   it('purge cursor survives reopen via store meta', () => {
     const { dir, log, store, close } = pair('fielog-perf-sync-');
-    for (let i = 0; i < 2; i++) appendPayment(log, store, 100 + i);
+    for (let i = 0; i < 2; i++) appendEntry(log, store, 100 + i);
     assert.deepEqual(purgeRevoked(log, store, { revokedDevices: ['evil'] }), { scanned: 2, quarantined: 2 });
     close();
     const log2 = openLog(join(dir, 'a.log'), 'evil');
@@ -78,11 +78,11 @@ describe('flfix-perf-sync', () => {
   it('grown revoke set falls back to a full rescan', () => {
     const { log, store, close } = pair('fielog-perf-sync-', 'devA');
     try {
-      appendPayment(log, store, 100, 'devA');
-      appendPayment(log, store, 200, 'devB');
+      appendEntry(log, store, 100, 'devA');
+      appendEntry(log, store, 200, 'devB');
       assert.deepEqual(purgeRevoked(log, store, { revokedDevices: ['devA'] }), { scanned: 2, quarantined: 1 });
       assert.deepEqual(
-        store.query<{ event_id: string }>(`SELECT event_id FROM payment`).map((r) => r.event_id).length,
+        store.query<{ event_id: string }>(`SELECT event_id FROM entries`).map((r) => r.event_id).length,
         1,
       );
       // devB revoked later: the prefix must rescan, or its pre-revoke row survives.
@@ -90,7 +90,7 @@ describe('flfix-perf-sync', () => {
         purgeRevoked(log, store, { revokedDevices: ['devA', 'devB'] }),
         { scanned: 2, quarantined: 1 },
       );
-      assert.deepEqual(store.query(`SELECT event_id FROM payment`), []);
+      assert.deepEqual(store.query(`SELECT event_id FROM entries`), []);
     } finally {
       close();
     }
@@ -99,15 +99,15 @@ describe('flfix-perf-sync', () => {
   it('unversioned predicate always rescans so late revokes still purge', () => {
     const { log, store, close } = pair('fielog-perf-sync-', 'devA');
     try {
-      appendPayment(log, store, 100, 'devA');
-      appendPayment(log, store, 200, 'devB');
+      appendEntry(log, store, 100, 'devA');
+      appendEntry(log, store, 200, 'devB');
       const revoked = new Set(['devA']);
       const isRevoked = (ev: LogEvent): boolean => revoked.has(ev.device_id);
       assert.deepEqual(purgeRevoked(log, store, { isRevoked }), { scanned: 2, quarantined: 1 });
       // Revoke state mutated behind the same closure: a suffix-only scan would miss devB.
       revoked.add('devB');
       assert.deepEqual(purgeRevoked(log, store, { isRevoked }), { scanned: 2, quarantined: 1 });
-      assert.deepEqual(store.query(`SELECT event_id FROM payment`), []);
+      assert.deepEqual(store.query(`SELECT event_id FROM entries`), []);
     } finally {
       close();
     }
@@ -116,8 +116,8 @@ describe('flfix-perf-sync', () => {
   it('versioned predicate goes incremental; a version bump rescans', () => {
     const { log, store, close } = pair('fielog-perf-sync-', 'devA');
     try {
-      appendPayment(log, store, 100, 'devA');
-      appendPayment(log, store, 200, 'devB');
+      appendEntry(log, store, 100, 'devA');
+      appendEntry(log, store, 200, 'devB');
       const isRevoked = (ev: LogEvent): boolean => ev.device_id === 'devA';
       assert.deepEqual(
         purgeRevoked(log, store, { isRevoked, revokeVersion: 3 }),
@@ -140,7 +140,7 @@ describe('flfix-perf-sync', () => {
     const { log, store, close } = pair('fielog-perf-sync-', 'devA');
     try {
       const relay = new MemoryRelay();
-      await relay.push([relayPayment('good-p', 1, 'devA', 1000), relayPayment('bad-p', 2, 'devB', 9000)]);
+      await relay.push([relayEntry('good-p', 1, 'devA', 1000), relayEntry('bad-p', 2, 'devB', 9000)]);
       const res = await pullRemote(log, store, relay, 'devA', { baseMs: 1, maxMs: 5, revokedDevices: ['devB'] });
       assert.equal(res.pulled, 2);
       assert.equal(res.applied, 1);

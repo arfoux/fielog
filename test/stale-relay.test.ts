@@ -19,7 +19,7 @@ describe('stale-relay pull miss', () => {
     const fresh = new MemoryRelay();
     const seed = await createKernel({ file: join(dir, 'seed.db') });
     try {
-      for (let i = 0; i < 5; i++) await seed.append({ type: 'payment', amount: 1000 + i, actor: 'toko' });
+      for (let i = 0; i < 5; i++) await seed.append({ type: 'entry', value: 1000 + i, actor: 'toko' });
       const up = await seed.sync(fresh, { ...fast });
       assert.equal(up.acked, 5);
       assert.equal(fresh.size, 5);
@@ -32,12 +32,12 @@ describe('stale-relay pull miss', () => {
       const down = await reader.sync([stale, fresh], { ...fast });
       assert.equal(down.pulled, 5);
       assert.equal(down.applied, 5);
-      const rows = await reader.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment WHERE voided = 0`);
+      const rows = await reader.query<{ n: number }>(`SELECT COUNT(*) AS n FROM entries WHERE voided = 0`);
       assert.equal(rows[0].n, 5);
       // Resume is exact-once: nothing new, nothing duplicated.
       const again = await reader.sync([stale, fresh], { ...fast });
       assert.equal(again.applied, 0);
-      const rows2 = await reader.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment WHERE voided = 0`);
+      const rows2 = await reader.query<{ n: number }>(`SELECT COUNT(*) AS n FROM entries WHERE voided = 0`);
       assert.equal(rows2[0].n, 5);
     } finally {
       reader.close();
@@ -50,10 +50,10 @@ describe('stale-relay pull miss', () => {
     const fresh = new MemoryRelay();
     const seed = await createKernel({ file: join(dir, 'seed.db') });
     try {
-      await seed.append({ type: 'payment', amount: 100, actor: 'toko' });
-      await seed.append({ type: 'payment', amount: 200, actor: 'toko' });
+      await seed.append({ type: 'entry', value: 100, actor: 'toko' });
+      await seed.append({ type: 'entry', value: 200, actor: 'toko' });
       await seed.sync(stale, { ...fast });
-      await seed.append({ type: 'payment', amount: 300, actor: 'toko' });
+      await seed.append({ type: 'entry', value: 300, actor: 'toko' });
       await seed.sync(fresh, { ...fast });
       assert.equal(stale.size, 2);
       assert.equal(fresh.size, 1); // delta only: seq 1-2 already acked via stale
@@ -64,7 +64,7 @@ describe('stale-relay pull miss', () => {
     try {
       const down = await reader.sync([stale, fresh], { ...fast });
       assert.equal(down.applied, 3);
-      const rows = await reader.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+      const rows = await reader.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
       assert.equal(rows[0].total, 600);
     } finally {
       reader.close();

@@ -2,7 +2,7 @@
 
 Model calculator (~35 lines) + state-vs-implementation comparison every 100
 steps. Port of skill-6 SOLID to fielog: a plain-arithmetic oracle mirroring
-`route()` routing in `src/store.ts` (only `payment` / `stock.add` / `stock.sell` /
+`route()` routing in `src/store.ts` (only `entry` / `stock.add` / `stock.sell` /
 `undo.compensate` cases), comparison results reported loudly with seed + step
 + op log.
 
@@ -20,13 +20,13 @@ steps. Port of skill-6 SOLID to fielog: a plain-arithmetic oracle mirroring
 
 | store.ts `route()` | oracle |
 |---|---|
-| `payment` insert + `resolvePendingUndos` (early undo -> void) | `payment()`: `pend` -> `void`, else `pay[actor] += n` |
+| `entry` insert + `resolvePendingEntries` (early undo -> void) | `entry()`: `pend` -> `void`, else `pay[actor] += n` |
 | `stock.add` adds qty + records move | `add()`: `pend` -> `void`, else `stk[item] += q`, `mov[id]` |
 | `stock.sell` oversell -> move voided + conflict, without reducing stock | `sell()`: short stock -> `void`, else `stk[item] -= q`, `mov[id] = -q` |
-| `undo.compensate` payment -> void; live move -> void + qty refund; unknown -> parks in `records` | `undo()`: live payment -> reduce `pay`, void; live move -> `stk -= signed`, void; unknown -> `pend` |
-| target landing after a parked undo -> `resolvePendingUndos` voids it | `payment/add/sell` checks `pend` first — same effect oracle-side |
-Deliberately out of scope (like fuzz): `payment.*` / settle transitions —
-the op mix is only payment/undo/stock + kill-respawn/sync/replay.
+| `undo.compensate` entry -> void; live move -> void + qty refund; unknown -> parks in `records` | `undo()`: live entry -> reduce `pay`, void; live move -> `stk -= signed`, void; unknown -> `pend` |
+| target landing after a parked undo -> `resolvePendingEntries` voids it | `entry/add/sell` checks `pend` first — same effect oracle-side |
+Deliberately out of scope (like fuzz): `entry.*` / resolve transitions —
+the op mix is only entry/undo/stock + kill-respawn/sync/replay.
 
 
 ## run

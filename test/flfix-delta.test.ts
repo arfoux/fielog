@@ -29,11 +29,11 @@ function mkRemote(id: string, seq: number, over: Partial<LogEvent> = {}): LogEve
   return {
     id,
     seq,
-    type: 'payment',
+    type: 'entry',
     actor: 'budi',
     device_id: 'origin-dev',
     ts_device: 12345,
-    payload: { amount: 1000, actor: 'budi' },
+    payload: { value: 1000, actor: 'budi' },
     prev_hash: 'origin-prev',
     hash: 'origin-hash',
     ...over,
@@ -60,8 +60,8 @@ describe('deltasync audit fixes', () => {
     const peer = scriptedPeer(
       [
         mkRemote('good-1', 1),
-        // Shape-invalid: checkAppend rejects a non-positive amount.
-        mkRemote('poison-1', 2, { payload: { amount: -5, actor: 'budi' } }),
+        // Shape-invalid: checkAppend rejects a non-positive value.
+        mkRemote('poison-1', 2, { payload: { value: -5, actor: 'budi' } }),
       ],
       seen,
     );
@@ -166,7 +166,7 @@ describe('deltasync audit fixes', () => {
     assert.equal(ev.origin_device, 'origin-dev');
     assert.equal(ev.ts_device, 12345);
     assert.equal(ev.actor, 'budi');
-    assert.equal(ev.type, 'payment');
-    assert.deepEqual(ev.payload, { amount: 1000, actor: 'budi' });
+    assert.equal(ev.type, 'entry');
+    assert.deepEqual(ev.payload, { value: 1000, actor: 'budi' });
   });
 });

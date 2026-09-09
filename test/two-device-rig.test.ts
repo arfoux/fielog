@@ -13,7 +13,7 @@ const N = Number(process.env.RIG_N ?? 20);
 
 async function total(k: Kernel): Promise<number> {
   const rows = await k.query<{ total: number }>(
-    `SELECT SUM(amount) AS total FROM payment WHERE voided = 0`,
+    `SELECT SUM(value) AS total FROM entries WHERE voided = 0`,
   );
   return rows[0]?.total ?? 0;
 }
@@ -37,9 +37,9 @@ describe('two-device rig device-01/device-02', () => {
   it('s1: device-01 sells offline, device-02 pulls until equal', async () => {
     let expected = 0;
     for (let i = 0; i < N; i++) {
-      const amount = 5000 + i * 250;
-      expected += amount;
-      await k1.append({ type: 'payment', amount, actor: 'device-01' });
+      const value = 5000 + i * 250;
+      expected += value;
+      await k1.append({ type: 'entry', value, actor: 'device-01' });
     }
     await k1.sync(relay, { baseMs: 1 });
     const res = await k2.sync(relay, { baseMs: 1 });
@@ -59,8 +59,8 @@ describe('two-device rig device-01/device-02', () => {
       const b = 3000 + i * 100;
       sum1 += a;
       sum2 += b;
-      await k1.append({ type: 'payment', amount: a, actor: 'device-01' });
-      await k2.append({ type: 'payment', amount: b, actor: 'device-02' });
+      await k1.append({ type: 'entry', value: a, actor: 'device-01' });
+      await k2.append({ type: 'entry', value: b, actor: 'device-02' });
     }
     const want = sum1 + sum2;
     await k1.sync(relay, { baseMs: 1 });
@@ -74,9 +74,9 @@ describe('two-device rig device-01/device-02', () => {
   it('s3: cut mid-run then resume without duplicates', async () => {
     let expected = 0;
     for (let i = 0; i < N; i++) {
-      const amount = 1000 + i;
-      expected += amount;
-      await k1.append({ type: 'payment', amount, actor: 'device-01' });
+      const value = 1000 + i;
+      expected += value;
+      await k1.append({ type: 'entry', value, actor: 'device-01' });
     }
     relay.failAfterEvents = 7;
     await assert.rejects(k1.sync(relay, { chunkSize: 10, maxRetries: 0, baseMs: 1 }), /mid-batch/);

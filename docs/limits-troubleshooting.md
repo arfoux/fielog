@@ -30,9 +30,9 @@ Honest limits + ways out of common problems. No false promises.
 |---|---|---|
 | `ERR_DEVICE_MISMATCH` on open | explicit `deviceId` differs from the stored explicit id | open with the stored id, or a new file for a new device |
 | `ERR_OUTBOX_FULL` | outbox ≥ cap | `sync`, then append again |
-| `payment rejected: amount ...` | amount is not a positive integer | fix the input; no log line is written (fail-fast) |
-| `payment rejected: state ...` | state other than `DRAFT`/`IOU_RECORDED` | settlement only via `settle`/online ack |
-| `ERR_UNKNOWN_TARGET` (hide/hold) | mistyped id / target not yet synced | check the id; blind compensators (`undo`/`settle`) need no local target |
+| `entry rejected: value ...` | value is not a positive integer | fix the input; no log line is written (fail-fast) |
+| `entry rejected: state ...` | state other than `DRAFT`/`RECORDED` | resolution only via `resolve`/online ack |
+| `ERR_UNKNOWN_TARGET` (hide/hold) | mistyped id / target not yet synced | check the id; blind compensators (`undo`/`resolve`) need no local target |
 | `ERR_NOT_HIDDEN` (show) | the id is genuinely not hidden | nothing is written; check `hiddenIds` |
 | `serve needs --trust ...` (exit 2) | serve without a registry | add `--trust id=pub.pem` or `--unsigned` (dev) |
 | `relay rejected push/pull` | wrong token scope / revoked / unknown device | check token scope, expiry, the `--trust` registry, revocation status |

@@ -51,11 +51,11 @@ describe('kill9 recovery', () => {
         const t = line.trim();
         if (!t) continue;
         const ev = JSON.parse(t);
-        expected += Number(ev.payload.amount);
+        expected += Number(ev.payload.value);
         lines += 1;
       }
       assert.equal(lines, h.events);
-      const rows = await k.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+      const rows = await k.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
       assert.equal(rows[0].total, expected);
     } finally {
       k.close();

@@ -1,7 +1,7 @@
 # corpus generator
 
 Port of skill-10 (`corpus-generator`, status HEALTHY) to fielog.
-One seeded function emits a fixed op mix — `payment` / `stock.add` /
+One seeded function emits a fixed op mix — `entry` / `stock.add` /
 `stock.sell` / `undo.compensate` — with deterministic ids, so the same
 `(seed, n)` always yields byte-identical JSONL. The corpus feeds soak,
 fuzz, and model-oracle spins without re-inventing a generator per spin.
@@ -39,7 +39,7 @@ first event, so `undo` always has a target):
 
 | op | share | effect |
 | --- | --- | --- |
-| `payment` | ~50% | amount `100 + floor(rng()*4900)`, actor from `device-a/b/c` |
+| `entry` | ~50% | value `100 + floor(rng()*4900)`, actor from `device-a/b/c` |
 | `stock.add` | ~20% | item from `kopi/gula/beras`, qty 1..20 |
 | `stock.sell` | ~15% | same items, qty 1..10 (oversell parks, oracle mirrors it) |
 | `undo.compensate` | ~15% | `reverses` = random earlier corpus id (unknown/voided targets park) |
@@ -62,13 +62,13 @@ kernel ids; undo targets resolve through the same map.
 ```text
 $ bun test test/corpus-gen.test.ts
 [corpus-gen] determinism seed=42 n=200 sha=ca7311f769ba
-[corpus-gen] replay seed=42 n=200 sha=ca7311f769ba payment=97 add=40 sell=27 undo=36 verify=ok
+[corpus-gen] replay seed=42 n=200 sha=ca7311f769ba entry=97 add=40 sell=27 undo=36 verify=ok
  4 pass, 0 fail (3.46s)
 ```
 
 ```text
 $ bun scripts/corpus-gen.ts --seed 42 --n 200 --out /tmp/corpus-proof
-[corpus-gen] seed=42 n=200 sha=ca7311f769ba payment=97 add=40 sell=27 undo=36
+[corpus-gen] seed=42 n=200 sha=ca7311f769ba entry=97 add=40 sell=27 undo=36
 [corpus-gen] wrote corpus-42-200.jsonl + corpus-42-200.manifest.json
 ```
 
@@ -79,7 +79,7 @@ Replay (in-test, 200 events through `createKernel` + shared `Oracle` +
 
 - Single device, offline ops only: no `sync`/`restart` interleaving
   (those live in `soak-runner`), no multi-writer conflicts.
-- No `settle`/`payment.*` ops: money-state transitions are covered by
+- No `resolve`/`entry.*` ops: money-state transitions are covered by
   `model-oracle` / `model-fuzz`.
 - Phase-2 (merge + tag) is never done by this script; the coordinator
   acts via its own inbox.

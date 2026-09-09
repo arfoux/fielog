@@ -18,30 +18,30 @@ const STEPS = 250;
 const CHECK_EVERY = 25;
 
 interface Model {
-  live: Map<string, number>; // payment id -> amount, not yet undone
-  expected: number; // sum of live amounts
+  live: Map<string, number>; // entry id -> value, not yet undone
+  expected: number; // sum of live values
 }
 
 interface Floor {
   ack: number; // high-water ackSeq: must never regress (no lost acked events)
 }
 
-// Sum of payment amounts minus voided, derived straight from the log file.
+// Sum of entry values minus voided, derived straight from the log file.
 function fileTotal(logPath: string): { total: number; live: number } {
-  const amountById = new Map<string, number>();
+  const valueById = new Map<string, number>();
   const voided = new Set<string>();
   for (const line of readFileSync(logPath, 'utf8').split('\n')) {
     const t = line.trim();
     if (!t) continue;
     const ev = JSON.parse(t) as { id: string; type: string; payload: Record<string, unknown> };
-    if (ev.type === 'payment') amountById.set(ev.id, Number(ev.payload.amount));
+    if (ev.type === 'entry') valueById.set(ev.id, Number(ev.payload.value));
     else if (ev.type === 'undo.compensate') voided.add(String(ev.payload.reverses));
   }
   let total = 0;
   let live = 0;
-  for (const [id, amount] of amountById) {
+  for (const [id, value] of valueById) {
     if (voided.has(id)) continue;
-    total += amount;
+    total += value;
     live += 1;
   }
   return { total, live };
@@ -56,13 +56,13 @@ async function checkInvariants(k: Kernel, model: Model, relay: MemoryRelay, floo
   assert.equal(h.quarantined, 0);
 
   // Totals match the log minus voided: model and file agree with the read-model.
-  const rows = await k.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+  const rows = await k.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
   const sqlTotal = rows[0].total ?? 0;
   assert.equal(sqlTotal, model.expected, 'sql total diverges from model');
   const file = fileTotal(k.logPath);
   assert.equal(sqlTotal, file.total, 'sql total diverges from log file');
   assert.equal(file.live, model.live.size, 'live count diverges from log file');
-  const liveRows = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment WHERE voided = 0`);
+  const liveRows = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM entries WHERE voided = 0`);
   assert.equal(liveRows[0].n, model.live.size);
 
   // No lost acked events: cursor never regresses, every acked seq is present
@@ -93,12 +93,12 @@ async function runSoak(seed: number): Promise<void> {
       const r = rng();
       if (r < 0.5 || model.live.size === 0) {
         // Append. Undo falls through to here when nothing is live.
-        const amount = 100 + Math.floor(rng() * 4900);
-        const ev = await k.append({ type: 'payment', amount, actor: 'soak' });
-        model.live.set(ev.id, amount);
-        model.expected += amount;
+        const value = 100 + Math.floor(rng() * 4900);
+        const ev = await k.append({ type: 'entry', value, actor: 'soak' });
+        model.live.set(ev.id, value);
+        model.expected += value;
       } else if (r < 0.62) {
-        // Undo a random live payment.
+        // Undo a random live entry.
         const ids = [...model.live.keys()];
         const id = ids[Math.floor(rng() * ids.length)];
         await k.undo(id, 'soak');

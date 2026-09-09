@@ -72,9 +72,9 @@ describe('cli', () => {
     let expected = 0;
     const ka = await createKernel({ file: adb });
     for (let i = 0; i < 20; i++) {
-      const amount = 5000 + i * 250;
-      expected += amount;
-      await ka.append({ type: 'payment', amount, actor: 'device-1' });
+      const value = 5000 + i * 250;
+      expected += value;
+      await ka.append({ type: 'entry', value, actor: 'device-1' });
     }
     ka.close();
 
@@ -88,9 +88,9 @@ describe('cli', () => {
 
     const kb = await createKernel({ file: bdb });
     try {
-      const rows = await kb.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+      const rows = await kb.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
       assert.equal(rows[0].total, expected);
-      const n = await kb.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment WHERE voided = 0`);
+      const n = await kb.query<{ n: number }>(`SELECT COUNT(*) AS n FROM entries WHERE voided = 0`);
       assert.equal(n[0].n, 20);
     } finally {
       kb.close();

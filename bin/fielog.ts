@@ -112,14 +112,14 @@ async function cmdDemo(): Promise<void> {
   try {
     let expected = 0;
     for (let i = 0; i < 20; i++) {
-      const amount = 5000 + i * 250;
-      expected += amount;
-      await node1.append({ type: 'payment', amount, actor: 'device-01' });
+      const value = 5000 + i * 250;
+      expected += value;
+      await node1.append({ type: 'entry', value, actor: 'device-01' });
     }
     await node1.sync(c1, { trustedDevices: { 'device-02': k2.publicKeyPem } });
     await node2.sync(c2, { trustedDevices: { 'device-01': k1.publicKeyPem } });
-    const t1 = await node1.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
-    const t2 = await node2.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+    const t1 = await node1.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
+    const t2 = await node2.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
     console.log(`sync: device-01 = ${t1[0].total} | device-02 = ${t2[0].total} | expected = ${expected}`);
     if (t1[0].total !== expected || t2[0].total !== expected) {
       console.error(`totals differ: device-01=${t1[0].total} device-02=${t2[0].total} expected=${expected}`);

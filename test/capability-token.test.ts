@@ -74,15 +74,15 @@ describe('capability tokens (granular per-token-id)', () => {
     const authority = generateDeviceKey('authority');
     const device = generateDeviceKey('device-a');
     const now = Date.now();
-    const grant = issueGrant(authority.privateKeyPem, 'hq', device.deviceId, ['payment:append'], GRANT_TTL_MS, now);
-    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'payment:append', undefined, now), true);
-    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'payment:settle', undefined, now), false);
+    const grant = issueGrant(authority.privateKeyPem, 'hq', device.deviceId, ['entries:append'], GRANT_TTL_MS, now);
+    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'entries:append', undefined, now), true);
+    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'entries:resolve', undefined, now), false);
     assert.equal(
-      authorizeGrant({ authorityPublicPem: authority.publicKeyPem, grant, scope: 'payment:settle', now }).ok,
+      authorizeGrant({ authorityPublicPem: authority.publicKeyPem, grant, scope: 'entries:resolve', now }).ok,
       false,
     );
     const rev = new RevocationList();
     rev.revoke(grant.id);
-    assert.equal(authorizeGrant({ authorityPublicPem: authority.publicKeyPem, grant, scope: 'payment:append', revocations: rev, now }).ok, false);
+    assert.equal(authorizeGrant({ authorityPublicPem: authority.publicKeyPem, grant, scope: 'entries:append', revocations: rev, now }).ok, false);
   });
 });

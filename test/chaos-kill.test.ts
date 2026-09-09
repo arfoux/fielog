@@ -38,13 +38,13 @@ function isMarkerLine(line: string): boolean {
   }
 }
 
-/** Sum of payload.amount over every durable (non-marker) log line. */
+/** Sum of payload.value over every durable (non-marker) log line. */
 function logTotal(logPath: string): { sum: number; count: number } {
   let sum = 0;
   let count = 0;
   for (const line of linesOf(logPath)) {
     if (isMarkerLine(line)) continue;
-    sum += Number((JSON.parse(line) as { payload: { amount: number } }).payload.amount);
+    sum += Number((JSON.parse(line) as { payload: { value: number } }).payload.value);
     count += 1;
   }
   return { sum, count };
@@ -52,7 +52,7 @@ function logTotal(logPath: string): { sum: number; count: number } {
 
 async function dbTotal(k: { query: <T>(sql: string) => Promise<T[]> }): Promise<{ sum: number; count: number }> {
   const rows = await k.query<{ total: number; n: number }>(
-    `SELECT SUM(amount) AS total, COUNT(*) AS n FROM payment WHERE voided = 0`,
+    `SELECT SUM(value) AS total, COUNT(*) AS n FROM entries WHERE voided = 0`,
   );
   return { sum: rows[0].total, count: rows[0].n };
 }
@@ -64,7 +64,7 @@ describe('chaos-kill', () => {
       join(dir, 'child.ts'),
       `import { createKernel } from ${KERNEL};\n` +
         `const k = await createKernel({ file: ${JSON.stringify(join(dir, 'ledger.db'))} });\n` +
-        `for (let i = 0; i < 5000; i++) await k.append({ type: 'payment', amount: 100 + (i % 997), actor: 'device' });\n` +
+        `for (let i = 0; i < 5000; i++) await k.append({ type: 'entry', value: 100 + (i % 997), actor: 'device' });\n` +
         `k.close();\n`,
     );
     const logPath = join(dir, 'ledger.log');
@@ -87,7 +87,7 @@ describe('chaos-kill', () => {
 
       // Continue: the reopened kernel appends on the same chain.
       const before = h.events;
-      for (let i = 0; i < 20; i++) await k.append({ type: 'payment', amount: 7, actor: 'device' });
+      for (let i = 0; i < 20; i++) await k.append({ type: 'entry', value: 7, actor: 'device' });
       assert.equal(k.health().events, before + 20);
       assert.equal((k.verifyLog() as { ok: boolean }).ok, true);
     } finally {
@@ -105,7 +105,7 @@ describe('chaos-kill', () => {
         `const relay = new MemoryRelay();\n` +
         `let n = 0;\n` +
         `for (let r = 0; r < 200; r++) {\n` +
-        `  for (let i = 0; i < 10; i++, n++) await k.append({ type: 'payment', amount: 100, actor: 'device' });\n` +
+        `  for (let i = 0; i < 10; i++, n++) await k.append({ type: 'entry', value: 100, actor: 'device' });\n` +
         `  await k.sync(relay, { chunkSize: 10, baseMs: 1 });\n` +
         `  await k.snapshot();\n` +
         `  await k.truncate();\n` +
@@ -138,7 +138,7 @@ describe('chaos-kill', () => {
       assert.deepEqual(await dbTotal(k), { sum: 100 * (sealed + kept), count: sealed + kept });
 
       // Continue: append, seal again, chain still verifies.
-      for (let i = 0; i < 10; i++) await k.append({ type: 'payment', amount: 100, actor: 'device' });
+      for (let i = 0; i < 10; i++) await k.append({ type: 'entry', value: 100, actor: 'device' });
       await k.sync(new MemoryRelay(), { chunkSize: 10, baseMs: 1 });
       await k.snapshot();
       await k.truncate();
@@ -158,7 +158,7 @@ describe('chaos-kill', () => {
         `const dir = ${JSON.stringify(dir)};\n` +
         `const k = await createKernel({ file: dir + '/ledger.db' });\n` +
         `const relay = new MemoryRelay();\n` +
-        `for (let i = 0; i < 500; i++) await k.append({ type: 'payment', amount: 100 + (i % 997), actor: 'device' });\n` +
+        `for (let i = 0; i < 500; i++) await k.append({ type: 'entry', value: 100 + (i % 997), actor: 'device' });\n` +
         `writeFileSync(dir + '/ready', 'appended');\n` +
         `for (let r = 0; r < 30; r++) await k.sync(relay, { chunkSize: 5, baseMs: 1 });\n` +
         `for (;;) await k.sync(relay, { chunkSize: 5, baseMs: 1 });\n`,
@@ -184,7 +184,7 @@ describe('chaos-kill', () => {
       assert.deepEqual(await dbTotal(k), { sum, count });
 
       // Continue: new appends sync to the tip.
-      for (let i = 0; i < 10; i++) await k.append({ type: 'payment', amount: 3, actor: 'device' });
+      for (let i = 0; i < 10; i++) await k.append({ type: 'entry', value: 3, actor: 'device' });
       await k.sync(relay2, { chunkSize: 5, baseMs: 1 });
       assert.equal(k.ackSeq(), 510);
       assert.equal(relay2.size, 510 - ackBefore);

@@ -36,7 +36,7 @@ describe('relay restart', () => {
     let expected = 0;
     for (let i = 0; i < 30; i++) {
       expected += 700 + i;
-      await k.append({ type: 'payment', amount: 700 + i, actor: 'toko' });
+      await k.append({ type: 'entry', value: 700 + i, actor: 'toko' });
     }
     const up = await k.sync(client, { chunkSize: 10, ...fast });
     assert.equal(up.acked, 30);
@@ -57,14 +57,14 @@ describe('relay restart', () => {
     // Client works offline through the outage, then resumes on restart.
     for (let i = 0; i < 5; i++) {
       expected += 50 + i;
-      await k.append({ type: 'payment', amount: 50 + i, actor: 'toko' });
+      await k.append({ type: 'entry', value: 50 + i, actor: 'toko' });
     }
     const re = await k.sync(client, { chunkSize: 10, maxRetries: 20, ...fast });
     assert.equal(re.acked, 5);
     assert.equal(k.ackSeq(), 35);
     assert.equal(server2.size, 35);
 
-    const rows = await k.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+    const rows = await k.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
     assert.equal(rows[0].total, expected);
   }, 30_000);
 });

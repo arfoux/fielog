@@ -42,8 +42,8 @@ describe('cas-store', () => {
   it('dedup: same bytes twice share one blob with refcount 2', () => {
     const c = openCas(freshDir('dedup'));
     closers.push(() => c.close());
-    const k1 = c.put('foto-struk');
-    const k2 = c.put('foto-struk');
+    const k1 = c.put('photo-struk');
+    const k2 = c.put('photo-struk');
     assert.equal(k1, k2);
     assert.equal(c.stat(k1)?.refcount, 2);
     assert.equal(c.unlink(k1), false); // 2 -> 1, blob lives

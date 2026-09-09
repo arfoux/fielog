@@ -25,7 +25,7 @@ export interface SyncOpts {
   /** deviceId -> ed25519 publicKeyPem. When non-empty, pull verifies every
    * remote event signature and dead-letters forgeries (cursor still advances). */
   trustedDevices?: Map<string, string> | Record<string, string>;
-  /** High-value payment gate: amount >= limit needs threshold countersignatures. */
+  /** High-value entry gate: value >= limit needs threshold countersignatures. */
   highValue?: { limit: number; threshold: number };
   /** Device-level revoke set (origin device ids). Mirrors the relay tombstone
    * list or RevokeLog '*' rows via isDeviceRevoked below. Matching pull
@@ -191,7 +191,7 @@ function registryOf(opt: SyncOpts['trustedDevices']): Map<string, string> | null
 }
 
 /** Forgery gate: verify the origin device signature (+ countersign threshold
- * for high-value payment). False = dead-letter, never re-hashed clean. */
+ * for high-value entry). False = dead-letter, never re-hashed clean. */
 function verifyPullAuth(remote: LogEvent, registry: Map<string, string> | null, highValue?: { limit: number; threshold: number }): boolean {
   if (!registry) return true; // no registry: unsigned legacy path stays valid
   const origin = remote.device_id;
@@ -199,9 +199,9 @@ function verifyPullAuth(remote: LogEvent, registry: Map<string, string> | null, 
   if (!pub) return false; // unknown origin device: cannot authenticate
   if (typeof remote.signature !== 'string' || remote.signature === '') return false;
   if (!verifyEvent(pub, remote, remote.signature)) return false;
-  if (highValue && remote.type === 'payment') {
-    const amount = Number((remote.payload as Record<string, unknown>)?.['amount']);
-    if (Number.isFinite(amount) && amount >= highValue.limit) {
+  if (highValue && remote.type === 'entry') {
+    const value = Number((remote.payload as Record<string, unknown>)?.['value']);
+    if (Number.isFinite(value) && value >= highValue.limit) {
       const sigs = (remote.countersignatures ?? []) as Countersignature[];
       let met: boolean;
       try {
@@ -209,7 +209,7 @@ function verifyPullAuth(remote: LogEvent, registry: Map<string, string> | null, 
       } catch (err) {
         // Misconfiguration (threshold outside 1..registry.size) can never
         // verify: fail loud instead of dead-lettering every high-value
-        // payment into silent loss. Malformed per-event countersignature data
+        // entry into silent loss. Malformed per-event countersignature data
         // is unverified data, not misconfig: dead-letter as before.
         if (err instanceof RangeError) {
           throw new RangeError(
@@ -230,7 +230,7 @@ function verifyPullAuth(remote: LogEvent, registry: Map<string, string> | null, 
 // the `_quarantine` table (sqlite, alongside the read-model) and skipped past
 // the pull cursor like a dead-letter, so sync never converges blindly on
 // tainted data. Data that converged BEFORE the revoke arrived is purged from
-// the domain read views (payment/stock_moves/records) by purgeRevoked; the log
+// the domain read views (entries/stock_moves/records) by purgeRevoked; the log
 // line and the `_events` row stay so reopen replay (idempotent by UUID) cannot
 // resurrect the rows and forensics keeps the bytes.
 export interface QuarantineRow {
@@ -312,7 +312,7 @@ function quarantineOne(store: EventStore, ev: LogEvent, reason: string): boolean
       Date.now(),
       JSON.stringify(ev),
     ]);
-    store.query(`DELETE FROM payment WHERE event_id = ?`, [ev.id]);
+    store.query(`DELETE FROM entries WHERE event_id = ?`, [ev.id]);
     store.query(`DELETE FROM stock_moves WHERE event_id = ?`, [ev.id]);
     store.query(`DELETE FROM records WHERE event_id = ?`, [ev.id]);
     if ((moves[0]?.n ?? 0) > 0) {
@@ -461,7 +461,7 @@ function applyPullEvents(
       continue;
     }
     // Forgery laundering gate: the relay stores verbatim (dumb by design),
-    // so anyone can stash a "payment 1000000 as budi". Verify the ORIGIN hash
+    // so anyone can stash an "entry 1000000 as budi". Verify the ORIGIN hash
     // before the local re-hash below mints a clean copy. Forged events are
     // dead-lettered (skipped, cursor still advances past them).
     if (!verifyPullAuth(remote, registry, opts.highValue)) continue;

@@ -45,10 +45,10 @@ function mkEv(id: string): LogEvent {
   return {
     id,
     seq,
-    type: 'payment',
+    type: 'entry',
     device_id: 'device-test',
     ts_device: Date.now(),
-    payload: { amount: 100 },
+    payload: { value: 100 },
     prev_hash: 'GENESIS',
     hash: `hash-${id}`,
   };
@@ -165,11 +165,11 @@ describe('flfix-relay', () => {
     }
     await waitFor(() => b.liveCount >= MAX_LIVE_HINTS);
     // No completion signal exists for fire-and-forget live broadcasts, so
-    // settle briefly: the assertion is an upper bound, and the buffer only
-    // grows here, so extra settling can never flake a bounded buffer.
-    const { promise: settled, resolve: settle } = Promise.withResolvers<void>();
-    setTimeout(settle, 300);
-    await settled;
+    // wait briefly: the assertion is an upper bound, and the buffer only
+    // grows here, so extra waiting can never flake a bounded buffer.
+    const { promise, resolve } = Promise.withResolvers<void>();
+    setTimeout(resolve, 300);
+    await promise;
     assert.ok(b.liveCount <= MAX_LIVE_HINTS, `liveBuf grew to ${b.liveCount}, cap is ${MAX_LIVE_HINTS}`);
     assert.equal(server.size, total);
   }, 30_000);

@@ -101,7 +101,7 @@ describe('flfix-small audit suspects', () => {
     // the fold stays hidden — so retry-after-racy-check never corrupts.)
     await assert.rejects(hide(k, 'no-such-id'), /ERR_UNKNOWN_TARGET/);
     assert.equal(k.health().events, before);
-    await hide(k, a.id, { reason: 'wrong amount input' });
+    await hide(k, a.id, { reason: 'wrong value input' });
     await hide(k, a.id, { reason: 'racy retry' });
     const rows = await k.query<{ n: number }>(
       `SELECT COUNT(*) AS n FROM records WHERE type = '${TOMBSTONE_HIDE}'`,

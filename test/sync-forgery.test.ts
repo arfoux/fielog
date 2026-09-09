@@ -1,5 +1,5 @@
 // Forgery laundering: the relay stores verbatim (dumb by design), so anyone
-// can stash a "payment 1000000 as budi". Pull must verify the ORIGIN signature
+// can stash a "entry 1000000 as budi". Pull must verify the ORIGIN signature
 // before the local re-hash mints a clean copy; forgeries dead-letter
 // (skipped, cursor still advances) instead of landing in the log/read-model.
 import { describe, it } from 'bun:test';
@@ -32,8 +32,8 @@ describe('forgery pull gate', () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-forge-'));
     const budi = generateDeviceKey('budi-dev');
     const e1 = signed(budi.privateKeyPem, mkEv({
-      id: 'valid-1', seq: 1, type: 'payment', actor: 'budi', deviceId: budi.deviceId,
-      ts: 1, payload: { amount: 50000, actor: 'budi' }, prev: 'GENESIS',
+      id: 'valid-1', seq: 1, type: 'entry', actor: 'budi', deviceId: budi.deviceId,
+      ts: 1, payload: { value: 50000, actor: 'budi' }, prev: 'GENESIS',
     }));
     const relay = new MemoryRelay();
     await relay.push([e1]);
@@ -42,21 +42,21 @@ describe('forgery pull gate', () => {
       const res = await k.sync(relay, { ...fast, trustedDevices: new Map([[budi.deviceId, budi.publicKeyPem]]) });
       assert.equal(res.pulled, 1);
       assert.equal(res.applied, 1);
-      const rows = await k.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+      const rows = await k.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
       assert.equal(rows[0].total, 50000);
     } finally {
       k.close();
     }
   }, 30_000);
 
-  it('rejects forged 1000000 payment as budi and still advances', async () => {
+  it('rejects forged 1000000 entry as budi and still advances', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-forge-'));
     const budi = generateDeviceKey('budi-dev');
     const mallory = generateDeviceKey('mallory-dev');
     // Forged: claims budi's device id, signed by mallory's key.
     const forged = signed(mallory.privateKeyPem, mkEv({
-      id: 'forged-1', seq: 1, type: 'payment', actor: 'budi', deviceId: budi.deviceId,
-      ts: 1, payload: { amount: 1000000, actor: 'budi' }, prev: 'GENESIS',
+      id: 'forged-1', seq: 1, type: 'entry', actor: 'budi', deviceId: budi.deviceId,
+      ts: 1, payload: { value: 1000000, actor: 'budi' }, prev: 'GENESIS',
     }));
     const relay = new MemoryRelay();
     await relay.push([forged]);
@@ -66,7 +66,7 @@ describe('forgery pull gate', () => {
       const res = await k.sync(relay, opts);
       assert.equal(res.pulled, 1);
       assert.equal(res.applied, 0);
-      const rows = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment`);
+      const rows = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM entries`);
       assert.equal(rows[0].n, 0);
       const evs = await k.query(`SELECT * FROM _events WHERE id = 'forged-1'`);
       assert.equal(evs.length, 0);
@@ -86,22 +86,22 @@ describe('forgery pull gate', () => {
     const budi = generateDeviceKey('budi-dev');
     const mallory = generateDeviceKey('mallory-dev');
     const v1 = signed(budi.privateKeyPem, mkEv({
-      id: 'mix-good-1', seq: 1, type: 'payment', actor: 'budi', deviceId: budi.deviceId,
-      ts: 1, payload: { amount: 10000, actor: 'budi' }, prev: 'GENESIS',
+      id: 'mix-good-1', seq: 1, type: 'entry', actor: 'budi', deviceId: budi.deviceId,
+      ts: 1, payload: { value: 10000, actor: 'budi' }, prev: 'GENESIS',
     }));
     // Tampered payload: signed then edited, so the hash no longer matches.
     const t = signed(budi.privateKeyPem, mkEv({
-      id: 'mix-forged', seq: 2, type: 'payment', actor: 'budi', deviceId: budi.deviceId,
-      ts: 2, payload: { amount: 20000, actor: 'budi' }, prev: v1.hash,
+      id: 'mix-forged', seq: 2, type: 'entry', actor: 'budi', deviceId: budi.deviceId,
+      ts: 2, payload: { value: 20000, actor: 'budi' }, prev: v1.hash,
     }));
-    const tampered: LogEvent = { ...t, payload: { amount: 1000000, actor: 'budi' } };
+    const tampered: LogEvent = { ...t, payload: { value: 1000000, actor: 'budi' } };
     const wrongKey = signed(mallory.privateKeyPem, mkEv({
-      id: 'mix-forged-2', seq: 3, type: 'payment', actor: 'budi', deviceId: budi.deviceId,
-      ts: 3, payload: { amount: 30000, actor: 'budi' }, prev: 'x',
+      id: 'mix-forged-2', seq: 3, type: 'entry', actor: 'budi', deviceId: budi.deviceId,
+      ts: 3, payload: { value: 30000, actor: 'budi' }, prev: 'x',
     }));
     const v2 = signed(budi.privateKeyPem, mkEv({
-      id: 'mix-good-2', seq: 4, type: 'payment', actor: 'budi', deviceId: budi.deviceId,
-      ts: 4, payload: { amount: 40000, actor: 'budi' }, prev: 'y',
+      id: 'mix-good-2', seq: 4, type: 'entry', actor: 'budi', deviceId: budi.deviceId,
+      ts: 4, payload: { value: 40000, actor: 'budi' }, prev: 'y',
     }));
     const relay = new MemoryRelay();
     await relay.push([v1, tampered, wrongKey, v2]);
@@ -111,7 +111,7 @@ describe('forgery pull gate', () => {
       const res = await k.sync(relay, opts);
       assert.equal(res.pulled, 4);
       assert.equal(res.applied, 2);
-      const rows = await k.query<{ event_id: string }>(`SELECT event_id FROM payment ORDER BY amount`);
+      const rows = await k.query<{ event_id: string }>(`SELECT event_id FROM entries ORDER BY value`);
       assert.deepEqual(rows.map((r) => r.event_id), ['mix-good-1', 'mix-good-2']);
       const log = readFileSync(k.logPath, 'utf8');
       assert.ok(!log.includes('mix-forged'));
@@ -120,15 +120,15 @@ describe('forgery pull gate', () => {
     }
   }, 30_000);
 
-  it('high-value payment needs the countersign threshold', async () => {
+  it('high-value entry needs the countersign threshold', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-forge-'));
     const a = generateDeviceKey('device-a');
     const b = generateDeviceKey('device-b');
     const registry = new Map([[a.deviceId, a.publicKeyPem], [b.deviceId, b.publicKeyPem]]);
     const hv = { limit: 100000, threshold: 2 };
     const big1 = mkEv({
-      id: 'big-1', seq: 1, type: 'payment', actor: 'budi', deviceId: a.deviceId,
-      ts: 1, payload: { amount: 1000000, actor: 'budi' }, prev: 'GENESIS',
+      id: 'big-1', seq: 1, type: 'entry', actor: 'budi', deviceId: a.deviceId,
+      ts: 1, payload: { value: 1000000, actor: 'budi' }, prev: 'GENESIS',
     });
     // Single signature only: below threshold, must dead-letter.
     const thin: LogEvent = { ...big1, signature: signEvent(a.privateKeyPem, big1) };
@@ -142,8 +142,8 @@ describe('forgery pull gate', () => {
 
       // Same event with two distinct countersignatures: accepted.
       const big2 = mkEv({
-        id: 'big-2', seq: 2, type: 'payment', actor: 'budi', deviceId: a.deviceId,
-        ts: 2, payload: { amount: 1000000, actor: 'budi' }, prev: big1.hash,
+        id: 'big-2', seq: 2, type: 'entry', actor: 'budi', deviceId: a.deviceId,
+        ts: 2, payload: { value: 1000000, actor: 'budi' }, prev: big1.hash,
       });
       const sig = signEvent(a.privateKeyPem, big2);
       const wide: LogEvent = {
@@ -157,7 +157,7 @@ describe('forgery pull gate', () => {
       await relay.push([wide]);
       const r2 = await k.sync(relay, opts);
       assert.equal(r2.applied, 1);
-      const rows = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment WHERE event_id = 'big-2'`);
+      const rows = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM entries WHERE event_id = 'big-2'`);
       assert.equal(rows[0].n, 1);
     } finally {
       k.close();

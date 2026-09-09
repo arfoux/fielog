@@ -40,17 +40,17 @@ function poisonWrap(store: EventStore, poisonId: string): EventStore {
   };
 }
 
-function paymentIds(store: EventStore): string[] {
-  return store.query<{ event_id: string }>(`SELECT event_id FROM payment ORDER BY amount`).map((r) => r.event_id);
+function entryIds(store: EventStore): string[] {
+  return store.query<{ event_id: string }>(`SELECT event_id FROM entries ORDER BY value`).map((r) => r.event_id);
 }
 
 describe('flfix-sync', () => {
   it('push: one un-storable event dead-letters instead of pinning the batch cursor', async () => {
     const { log, store, close } = pair('fielog-flfix-push-');
     try {
-      const e1 = log.append({ type: 'payment', payload: { amount: 1000, actor: 'budi' } });
-      const e2 = log.append({ type: 'payment', payload: { amount: 2000, actor: 'budi' } });
-      const e3 = log.append({ type: 'payment', payload: { amount: 3000, actor: 'budi' } });
+      const e1 = log.append({ type: 'entry', payload: { value: 1000, actor: 'budi' } });
+      const e2 = log.append({ type: 'entry', payload: { value: 2000, actor: 'budi' } });
+      const e3 = log.append({ type: 'entry', payload: { value: 3000, actor: 'budi' } });
       const wrapped = poisonWrap(store, e2.id);
       const relay = new MemoryRelay();
 
@@ -64,7 +64,7 @@ describe('flfix-sync', () => {
       assert.equal(q[0].event_id, e2.id);
       assert.match(q[0].reason, /apply failed/);
       // Read-model converged on everything except the quarantined poison.
-      assert.deepEqual(paymentIds(store), [e1.id, e3.id]);
+      assert.deepEqual(entryIds(store), [e1.id, e3.id]);
 
       // Next run is a no-op delta, not a retry storm.
       const res2 = await pushPending(log, wrapped, relay, { chunkSize: 10, ...fast });
@@ -78,9 +78,9 @@ describe('flfix-sync', () => {
   it('pull: one un-storable event dead-letters and the cursor still advances', async () => {
     const { log, store, close } = pair('fielog-flfix-pull-');
     try {
-      const mk = (id: string, seq: number, amount: number): LogEvent => ({
-        id, seq, type: 'payment', actor: 'budi', device_id: 'devA', ts_device: seq,
-        payload: { amount, actor: 'budi' }, prev_hash: 'GENESIS', hash: `h-${id}`,
+      const mk = (id: string, seq: number, value: number): LogEvent => ({
+        id, seq, type: 'entry', actor: 'budi', device_id: 'devA', ts_device: seq,
+        payload: { value, actor: 'budi' }, prev_hash: 'GENESIS', hash: `h-${id}`,
       });
       const relay = new MemoryRelay();
       await relay.push([mk('g-1', 1, 1000), mk('p-1', 2, 2000), mk('g-2', 3, 3000)]);
@@ -90,7 +90,7 @@ describe('flfix-sync', () => {
       assert.equal(res.pulled, 3);
       assert.equal(res.applied, 2);
       assert.equal(listQuarantine(store).length, 1);
-      assert.deepEqual(paymentIds(store), ['g-1', 'g-2']);
+      assert.deepEqual(entryIds(store), ['g-1', 'g-2']);
 
       // Cursor advanced past the poison: no retry storm, no duplicate lines.
       const res2 = await pullRemote(log, wrapped, relay, 'devB', { chunkSize: 10, ...fast });
@@ -154,8 +154,8 @@ describe('flfix-sync', () => {
     try {
       store.setMeta('sync.ack_seq', '5');
       const mk = (seq: number): LogEvent => ({
-        id: `e${seq}`, seq, type: 'payment', actor: 'budi', device_id: 'devA', ts_device: seq,
-        payload: { amount: 1000 + seq, actor: 'budi' }, prev_hash: 'x', hash: `h${seq}`,
+        id: `e${seq}`, seq, type: 'entry', actor: 'budi', device_id: 'devA', ts_device: seq,
+        payload: { value: 1000 + seq, actor: 'budi' }, prev_hash: 'x', hash: `h${seq}`,
       });
       // Post-truncate log: seqs 1..7 swept, the live suffix restarts at 8.
       const events = [mk(8), mk(9), mk(10), mk(11)];
@@ -194,14 +194,14 @@ describe('flfix-sync', () => {
     }
   });
 
-  it('highValue threshold misconfig fails loud instead of dead-lettering payments', async () => {
+  it('highValue threshold misconfig fails loud instead of dead-lettering entries', async () => {
     const { log, store, close } = pair('fielog-flfix-hv-');
     try {
       const budi = generateDeviceKey('budi-dev');
       const mkRelayEv = (id: string, seq: number, extra?: Partial<LogEvent>): LogEvent => {
         const core = {
-          id, seq, type: 'payment', actor: 'budi', device_id: 'budi-dev', ts_device: seq,
-          payload: { amount: 1_000_000, actor: 'budi' }, prev_hash: 'GENESIS',
+          id, seq, type: 'entry', actor: 'budi', device_id: 'budi-dev', ts_device: seq,
+          payload: { value: 1_000_000, actor: 'budi' }, prev_hash: 'GENESIS',
         };
         const unsigned: LogEvent = { ...core, hash: hashFor(core) };
         return { ...unsigned, signature: signEvent(budi.privateKeyPem, unsigned), ...extra };
@@ -211,7 +211,7 @@ describe('flfix-sync', () => {
       await relay.push([mkRelayEv('hv-1', 1)]);
 
       // Threshold 2 with a single trusted device can never verify: operator
-      // misconfig. Sync must reject loudly, not swallow the payment.
+      // misconfig. Sync must reject loudly, not swallow the entry.
       await assert.rejects(
         pullRemote(log, store, relay, 'devB', {
           ...fast,
@@ -220,7 +220,7 @@ describe('flfix-sync', () => {
         }),
         /highValue misconfigured/,
       );
-      // Nothing converged and nothing was silently skipped: the payment waits.
+      // Nothing converged and nothing was silently skipped: the entry waits.
       assert.equal(log.readAll().length, 0);
       assert.equal(store.getMeta('sync.pull_cursor'), null);
 
@@ -237,7 +237,7 @@ describe('flfix-sync', () => {
         highValue: { limit: 100_000, threshold: 1 },
       });
       assert.equal(res.applied, 1);
-      assert.deepEqual(paymentIds(store), ['hv-2']);
+      assert.deepEqual(entryIds(store), ['hv-2']);
       assert.equal(store.getMeta('sync.pull_cursor'), '3');
     } finally {
       close();

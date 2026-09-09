@@ -29,14 +29,14 @@ describe('conflict surfacing', () => {
     assert.equal(stock[0].qty, 1);
   });
 
-  it('double-settle on money surfaces a conflict row', async () => {
-    const pay = await k.append({ type: 'payment', amount: 90000, actor: 'budi' });
-    await k.settle(pay.id, 'settled', 'server');
-    await k.settle(pay.id, 'settled', 'server'); // replayed/duplicated ack
+  it('double-resolve on money surfaces a conflict row', async () => {
+    const pay = await k.append({ type: 'entry', value: 90000, actor: 'budi' });
+    await k.resolve(pay.id, 'resolved', 'server');
+    await k.resolve(pay.id, 'resolved', 'server'); // replayed/duplicated ack
 
-    const states = await k.query(`SELECT state FROM payment WHERE event_id = $id`, { id: pay.id });
-    assert.equal(states[0].state, 'SETTLED_ONLINE'); // first write stands
+    const states = await k.query(`SELECT state FROM entries WHERE event_id = $id`, { id: pay.id });
+    assert.equal(states[0].state, 'RESOLVED_ONLINE'); // first write stands
     const conflicts = await k.conflicts();
-    assert.ok(conflicts.some((c) => c.kind === 'double-settle'));
+    assert.ok(conflicts.some((c) => c.kind === 'double-resolve'));
   });
 });

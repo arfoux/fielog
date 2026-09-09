@@ -17,7 +17,7 @@ describe('sync resume mid-batch', () => {
     k = await createKernel({ file: join(dir, 'ledger.db') });
     relay = new MemoryRelay();
     for (let i = 0; i < 20; i++) {
-      await k.append({ type: 'payment', amount: 1000 + i, actor: 'budi' });
+      await k.append({ type: 'entry', value: 1000 + i, actor: 'budi' });
     }
   });
   afterEach(() => k?.close());

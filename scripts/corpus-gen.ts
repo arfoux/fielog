@@ -1,6 +1,6 @@
 // corpus-gen: deterministic synthetic corpus for fielog spins.
 // Port of skill-10 (corpus-generator, status HEALTHY): seeded mulberry32 emits
-// a fixed op mix (payment / stock.add / stock.sell / undo.compensate) with
+// a fixed op mix (entry / stock.add / stock.sell / undo.compensate) with
 // deterministic ids, so the same (seed, n) always yields byte-identical JSONL.
 // Library (genCorpus/corpusSha/writeCorpus) + CLI (bun scripts/corpus-gen.ts).
 import { createHash } from 'node:crypto';
@@ -25,7 +25,7 @@ export interface CorpusManifest {
   seed: number;
   n: number;
   sha: string;
-  counts: { payment: number; add: number; sell: number; undo: number };
+  counts: { entry: number; add: number; sell: number; undo: number };
 }
 
 const ACTORS = ['device-a', 'device-b', 'device-c'];
@@ -41,9 +41,9 @@ export function genCorpus(seed: number, n: number): Corpus {
     const id = `corpus-${seed >>> 0}-${i}`;
     const r = rng();
     if (r < 0.5 || known.length === 0) {
-      const amount = 100 + Math.floor(rng() * 4900);
+      const value = 100 + Math.floor(rng() * 4900);
       const actor = pick(ACTORS);
-      events.push({ id, type: 'payment', payload: { amount, actor }, actor });
+      events.push({ id, type: 'entry', payload: { value, actor }, actor });
       known.push(id);
     } else if (r < 0.7) {
       const item = pick(ITEMS);
@@ -76,9 +76,9 @@ export function corpusSha(c: Corpus): string {
 }
 
 export function corpusManifest(c: Corpus): CorpusManifest {
-  const counts = { payment: 0, add: 0, sell: 0, undo: 0 };
+  const counts = { entry: 0, add: 0, sell: 0, undo: 0 };
   for (const e of c.events) {
-    if (e.type === 'payment') counts.payment += 1;
+    if (e.type === 'entry') counts.entry += 1;
     else if (e.type === 'stock.add') counts.add += 1;
     else if (e.type === 'stock.sell') counts.sell += 1;
     else counts.undo += 1;
@@ -129,7 +129,7 @@ if (direct) {
   const paths = writeCorpus(c, out);
   console.log(
     `[corpus-gen] seed=${m.seed} n=${m.n} sha=${m.sha.slice(0, 12)} ` +
-      `payment=${m.counts.payment} add=${m.counts.add} sell=${m.counts.sell} undo=${m.counts.undo}`,
+      `entry=${m.counts.entry} add=${m.counts.add} sell=${m.counts.sell} undo=${m.counts.undo}`,
   );
   console.log(`[corpus-gen] wrote ${paths.jsonl} + ${paths.manifest}`);
 }

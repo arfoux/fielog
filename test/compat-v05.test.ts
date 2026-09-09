@@ -44,22 +44,22 @@ describe('compat v05 log', () => {
   it('current kernel opens + verifies + replays the v05 log', async () => {
     assert.deepEqual(k.verifyLog(), { ok: true });
     assert.equal(k.health().events, 5);
-    const payment = await k.query<{ n: number; total: number }>(
-      `SELECT COUNT(*) AS n, SUM(amount) AS total FROM payment WHERE voided = 0`,
+    const entry = await k.query<{ n: number; total: number }>(
+      `SELECT COUNT(*) AS n, SUM(value) AS total FROM entries WHERE voided = 0`,
     );
-    assert.equal(payment[0].n, 2);
-    assert.equal(payment[0].total, 40000);
+    assert.equal(entry[0].n, 2);
+    assert.equal(entry[0].total, 40000);
     const stock = await k.query<{ qty: number }>(`SELECT qty FROM stock WHERE item = 'kopi'`);
     assert.equal(stock[0].qty, 97);
   });
 
   it('append continues the v05 chain (seq + prev_hash)', async () => {
     const tip = JSON.parse(readFileSync(FIXTURE, 'utf8').trim().split('\n').at(-1)!).hash;
-    const ev = await k.append({ type: 'payment', amount: 5000, actor: 'agus' });
+    const ev = await k.append({ type: 'entry', value: 5000, actor: 'agus' });
     assert.equal(ev.seq, 6);
     assert.equal(ev.prev_hash, tip);
     assert.deepEqual(k.verifyLog(), { ok: true });
-    const rows = await k.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+    const rows = await k.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
     assert.equal(rows[0].total, 45000);
   });
 

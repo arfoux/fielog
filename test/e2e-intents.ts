@@ -2,7 +2,7 @@
 // journey test and its SIGKILL crash child. Position-based, crash-safe:
 // intents carry no event ids, so a killed-then-continued slice replays clean.
 export type Intent =
-  | { type: 'payment'; amount: number; actor: string }
+  | { type: 'entry'; value: number; actor: string }
   | { type: 'stock.add'; payload: { item: string; qty: number }; actor: string }
   | { type: 'stock.sell'; payload: { item: string; qty: number }; actor: string };
 
@@ -13,26 +13,26 @@ export function intentFor(i: number): Intent {
   if (i === 0) return { type: 'stock.add', payload: { item: 'kopi', qty: 2000 }, actor: 'gudang' };
   if (i === 1) return { type: 'stock.add', payload: { item: 'beras', qty: 2000 }, actor: 'gudang' };
   const m = i % 10;
-  if (m <= 5) return { type: 'payment', amount: 1000 + ((i * 37) % 9000), actor: actor };
+  if (m <= 5) return { type: 'entry', value: 1000 + ((i * 37) % 9000), actor: actor };
   if (m === 6)
     return { type: 'stock.add', payload: { item: i % 20 === 6 ? 'kopi' : 'beras', qty: 20 }, actor };
   if (m === 7 || m === 8)
     return { type: 'stock.sell', payload: { item: i % 2 === 0 ? 'kopi' : 'beras', qty: 1 + (i % 4) }, actor };
-  return { type: 'payment', amount: 2000 + ((i * 53) % 5000), actor: actor };
+  return { type: 'entry', value: 2000 + ((i * 53) % 5000), actor: actor };
 }
 
-// In-test mirror of the read-model for payment totals and stock levels.
+// In-test mirror of the read-model for entry totals and stock levels.
 // Sells never oversell by construction (seed 2000 + steady top-ups).
 export interface Mirror {
-  paymentTotal: number;
+  entryTotal: number;
   stock: Record<string, number>;
 }
 
 export function mirrorFor(range: [number, number]): Mirror {
-  const m: Mirror = { paymentTotal: 0, stock: {} };
+  const m: Mirror = { entryTotal: 0, stock: {} };
   for (let i = range[0]; i < range[1]; i++) {
     const it = intentFor(i);
-    if (it.type === 'payment') m.paymentTotal += it.amount;
+    if (it.type === 'entry') m.entryTotal += it.value;
     else if (it.type === 'stock.add') m.stock[it.payload.item] = (m.stock[it.payload.item] ?? 0) + it.payload.qty;
     else m.stock[it.payload.item] = (m.stock[it.payload.item] ?? 0) - it.payload.qty;
   }

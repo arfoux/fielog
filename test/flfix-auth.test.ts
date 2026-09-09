@@ -19,10 +19,10 @@ const ev = (id: string) => {
   const core = {
     id,
     seq: 1,
-    type: 'payment',
+    type: 'entry',
     device_id: 'd1',
     ts_device: 1,
-    payload: { amount: 1000 },
+    payload: { value: 1000 },
     prev_hash: 'GENESIS',
   };
   return { ...core, hash: hashFor(core) };
@@ -44,36 +44,36 @@ describe('flfix-auth: verifyGrant lifetime', () => {
   it('control: a fresh issueGrant verifies', () => {
     const authority = generateDeviceKey('authority');
     const device = generateDeviceKey();
-    const grant = issueGrant(authority.privateKeyPem, 'hq', device.deviceId, ['payment:append'], 60_000, NOW);
-    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'payment:append', undefined, NOW), true);
+    const grant = issueGrant(authority.privateKeyPem, 'hq', device.deviceId, ['entries:append'], 60_000, NOW);
+    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'entries:append', undefined, NOW), true);
   });
 
   it('rejects zero-TTL grant (expiresAt === issuedAt) even with a valid signature', () => {
     const authority = generateDeviceKey('authority');
     const device = generateDeviceKey();
-    const grant = forgeGrant(authority.privateKeyPem, device.deviceId, ['payment:append'], NOW, NOW);
-    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'payment:append', undefined, NOW), false);
+    const grant = forgeGrant(authority.privateKeyPem, device.deviceId, ['entries:append'], NOW, NOW);
+    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'entries:append', undefined, NOW), false);
   });
 
   it('rejects inverted lifetime (expiresAt < issuedAt) even with a valid signature', () => {
     const authority = generateDeviceKey('authority');
     const device = generateDeviceKey();
-    const grant = forgeGrant(authority.privateKeyPem, device.deviceId, ['payment:append'], NOW, NOW - 1);
-    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'payment:append', undefined, NOW - 2), false);
+    const grant = forgeGrant(authority.privateKeyPem, device.deviceId, ['entries:append'], NOW, NOW - 1);
+    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'entries:append', undefined, NOW - 2), false);
   });
 
   it('rejects use before issuance (not-before)', () => {
     const authority = generateDeviceKey('authority');
     const device = generateDeviceKey();
-    const grant = forgeGrant(authority.privateKeyPem, device.deviceId, ['payment:append'], NOW + 60_000, NOW + 120_000);
-    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'payment:append', undefined, NOW), false);
+    const grant = forgeGrant(authority.privateKeyPem, device.deviceId, ['entries:append'], NOW + 60_000, NOW + 120_000);
+    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'entries:append', undefined, NOW), false);
   });
 
   it('accepts a grant exactly at issuance', () => {
     const authority = generateDeviceKey('authority');
     const device = generateDeviceKey();
-    const grant = forgeGrant(authority.privateKeyPem, device.deviceId, ['payment:append'], NOW, NOW + 60_000);
-    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'payment:append', undefined, NOW), true);
+    const grant = forgeGrant(authority.privateKeyPem, device.deviceId, ['entries:append'], NOW, NOW + 60_000);
+    assert.equal(verifyGrant(authority.publicKeyPem, grant, 'entries:append', undefined, NOW), true);
   });
 });
 

@@ -18,10 +18,10 @@ import {
 
 const N = 20;
 
-function appendPayment(log: AppendLog, store: EventStore, i: number): void {
+function appendEntry(log: AppendLog, store: EventStore, i: number): void {
   const ev = log.append({
-    type: 'payment',
-    payload: { amount: 1000 + i, actor: 'budi' },
+    type: 'entry',
+    payload: { value: 1000 + i, actor: 'budi' },
     actor: 'budi',
     device_id: 'a',
   });
@@ -61,7 +61,7 @@ describe('deltasync manifest-first delta sync', () => {
     sa = openStore(join(dir, 'a.db'));
     lb = openLog(join(dir, 'b.log'), 'b');
     sb = openStore(join(dir, 'b.db'));
-    for (let i = 0; i < N; i++) appendPayment(la, sa, i);
+    for (let i = 0; i < N; i++) appendEntry(la, sa, i);
   });
 
   afterEach(() => {
@@ -85,8 +85,8 @@ describe('deltasync manifest-first delta sync', () => {
     assert.equal(res.done, true);
     assert.equal(res.resumed, false);
 
-    const rows = sb.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
-    const want = sa.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+    const rows = sb.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
+    const want = sa.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
     assert.equal(rows[0].total, want[0].total);
     assert.equal(lb.readAll().length, N);
   });
@@ -95,7 +95,7 @@ describe('deltasync manifest-first delta sync', () => {
     const calls: string[] = [];
     const peer = flakyPeer(createMemoryPeer(la), calls, 2); // die on 2nd fetch chunk
     await assert.rejects(syncDelta(lb, sb, 'b', peer, { chunkSize: 7, baseMs: 1, maxMs: 5, maxRetries: 0 }), /mid-transfer/);
-    const partial = sb.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment`)[0].n;
+    const partial = sb.query<{ n: number }>(`SELECT COUNT(*) AS n FROM entries`)[0].n;
     assert.ok(partial > 0 && partial < N); // chunk 1 durable, rest pending
     const persisted = sb.getMeta('deltasync.want');
     assert.ok(persisted && JSON.parse(persisted).length === N - partial); // resume cursor persisted
@@ -103,7 +103,7 @@ describe('deltasync manifest-first delta sync', () => {
     const res = await syncDelta(lb, sb, 'b', peer, { chunkSize: 7, baseMs: 1, maxMs: 5 });
     assert.equal(res.resumed, true);
     assert.equal(res.applied, N - partial);
-    assert.equal(sb.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment`)[0].n, N);
+    assert.equal(sb.query<{ n: number }>(`SELECT COUNT(*) AS n FROM entries`)[0].n, N);
     assert.equal(lb.readAll().length, N);
     // UUID exact-once: one row per id on both sides.
     const dup = sb.query<{ n: number }>(
@@ -126,6 +126,6 @@ describe('deltasync manifest-first delta sync', () => {
     const third = await syncDelta(lb, sb, 'b', peer, { chunkSize: 7, baseMs: 1 });
     assert.equal(chunk.length, 5);
     assert.equal(third.applied, 0);
-    assert.equal(sb.query<{ n: number }>(`SELECT COUNT(*) AS n FROM payment`)[0].n, N);
+    assert.equal(sb.query<{ n: number }>(`SELECT COUNT(*) AS n FROM entries`)[0].n, N);
   });
 });

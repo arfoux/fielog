@@ -95,7 +95,7 @@ describe('cli signed surface', () => {
     const prep = Bun.spawn([BUN, '-e', `
 import { createKernel } from ${JSON.stringify(kernelUrl)};
 const k = await createKernel({ file: ${JSON.stringify(adb)} });
-await k.append({ type: 'payment', amount: 1000, actor: 'toko' });
+await k.append({ type: 'entry', value: 1000, actor: 'toko' });
 k.close();
     `], { stdout: 'pipe', stderr: 'pipe' });
     procs.push(prep);

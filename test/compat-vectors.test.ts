@@ -23,15 +23,15 @@ const STRIP = ['server_time', 'origin_seq', 'origin_device', 'signature', 'count
 interface Fixture {
   file: string;
   events: number;
-  paymentN: number;
-  paymentTotal: number;
+  entryN: number;
+  entryTotal: number;
   stockItem: string;
   stockQty: number;
 }
 
 const FIXTURES: Fixture[] = [
-  { file: 'ledger-minimal.log', events: 5, paymentN: 2, paymentTotal: 40000, stockItem: 'kopi', stockQty: 97 },
-  { file: 'ledger-actor.log', events: 4, paymentN: 2, paymentTotal: 15000, stockItem: 'gula', stockQty: 47 },
+  { file: 'ledger-minimal.log', events: 5, entryN: 2, entryTotal: 40000, stockItem: 'kopi', stockQty: 97 },
+  { file: 'ledger-actor.log', events: 4, entryN: 2, entryTotal: 15000, stockItem: 'gula', stockQty: 47 },
 ];
 
 const rawLines = (f: Fixture): string[] =>
@@ -93,11 +93,11 @@ describe('compat vectors (healthy set)', () => {
     for (const f of FIXTURES) {
       const k = kernels.get(f.file)!;
       assert.equal(k.health().events, f.events);
-      const payment = await k.query<{ n: number; total: number }>(
-        `SELECT COUNT(*) AS n, SUM(amount) AS total FROM payment WHERE voided = 0`,
+      const entry = await k.query<{ n: number; total: number }>(
+        `SELECT COUNT(*) AS n, SUM(value) AS total FROM entries WHERE voided = 0`,
       );
-      assert.equal(payment[0].n, f.paymentN);
-      assert.equal(payment[0].total, f.paymentTotal);
+      assert.equal(entry[0].n, f.entryN);
+      assert.equal(entry[0].total, f.entryTotal);
       const stock = await k.query<{ qty: number }>(`SELECT qty FROM stock WHERE item = ?`, [f.stockItem]);
       assert.equal(stock[0].qty, f.stockQty);
     }
@@ -107,7 +107,7 @@ describe('compat vectors (healthy set)', () => {
     for (const f of FIXTURES) {
       const k = kernels.get(f.file)!;
       const tip = JSON.parse(rawLines(f).at(-1)!).hash;
-      const ev = await k.append({ type: 'payment', amount: 1000, actor: 'healthy' });
+      const ev = await k.append({ type: 'entry', value: 1000, actor: 'healthy' });
       assert.equal(ev.seq, f.events + 1);
       assert.equal(ev.prev_hash, tip);
       assert.deepEqual(k.verifyLog(), { ok: true });

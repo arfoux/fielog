@@ -139,7 +139,7 @@ describe('tombstone', () => {
     closers.push(() => k.close());
     const a = await k.append({ type: 'note', payload: { isi: 'struk-1' } });
     await k.append({ type: 'note', payload: { isi: 'struk-2' } });
-    await hide(k, a.id, { reason: 'wrong amount input' });
+    await hide(k, a.id, { reason: 'wrong value input' });
     assert.equal(k.health().events, 3);
     // Target line stays in the log; the tombstone parks beside it.
     const kept = await k.query<{ n: number }>(`SELECT COUNT(*) AS n FROM _events WHERE id = ?`, [a.id]);

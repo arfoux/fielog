@@ -14,13 +14,13 @@ not intent.
 - Deltasync: shape-invalid UUIDs are recorded in meta `<cursorKey>.dead`
   and never re-fetched; the want-list still drains (`src/deltasync.ts:10-13`).
 
-## 2. blind compensators: undo/settle need no local target
+## 2. blind compensators: undo/resolve need no local target
 
-`kernel.undo` / `settle` append compensation events without checking the
+`kernel.undo` / `resolve` append compensation events without checking the
 target exists (`src/kernel.ts:210-218`). Convergence via fold, not local
 presence: compensation arriving before its target parks in
 `records`/`conflicts` and revives when the target lands
-(`resolvePendingUndos`, `src/store.ts:233-267`).
+(`resolvePendingEntries`, `src/store.ts:233-267`).
 Pinned by `scripts/model-oracle.ts` + `docs/model-oracle.md`.
 
 ## 3. seal <= ack: truncate must never eat unsafe data

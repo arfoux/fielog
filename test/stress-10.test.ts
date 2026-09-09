@@ -44,9 +44,9 @@ describe('stress 10 clients', () => {
     let expected = 0;
     for (let c = 0; c < CLIENTS; c++) {
       for (let i = 0; i < PER_CLIENT; i++) {
-        const amount = 1000 + c * 100 + i;
-        expected += amount;
-        await kernels[c].append({ type: 'payment', amount, actor: `device-${c}` });
+        const value = 1000 + c * 100 + i;
+        expected += value;
+        await kernels[c].append({ type: 'entry', value, actor: `device-${c}` });
       }
     }
     // All ten sync at once over ten sockets.
@@ -63,7 +63,7 @@ describe('stress 10 clients', () => {
     // Every client sees the full picture after pulling.
     await Promise.all(kernels.map((k, c) => k.sync(clients[c], { ...fast })));
     for (const [c, k] of kernels.entries()) {
-      const rows = await k.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+      const rows = await k.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
       assert.equal(rows[0].total, expected, `client ${c} total diverges`);
     }
   }, 60_000);

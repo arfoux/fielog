@@ -19,7 +19,7 @@ revives from the log alone via replay + verify.
 Revival mechanism (`src/kernel.ts`, `createKernel`): `openLog` reads
 `ledger.log`, `store.replay` rebuilds sqlite idempotently per
 UUID, then `verify` checks the hash chain. The test uses deterministic
-amount `1000+i` (`i = 0..n-1`), so the expected total
+value `1000+i` (`i = 0..n-1`), so the expected total
 
 ## Adaptation limits vs the original
 
@@ -43,7 +43,7 @@ bash scripts/cold-drill.sh [--n <events>] [--dir <path>] [--keep-dir]
 
 | flag | default | meaning |
 |---|---|---|
-| `--n` | 50 | number of deterministic seeded `payment` events |
+| `--n` | 50 | number of deterministic seeded `entry` events |
 | `--dir` | fresh tmp | drill directory (created via `mktemp` in `${TMPDIR:-${TEMP:-${TMP:-/tmp}}}`) |
 | `--keep-dir` | delete | keep the drill directory for inspection |
 

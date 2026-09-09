@@ -1,5 +1,5 @@
 // Reorder resurrection: an undo/transition that arrives before its target
-// parks (records / unknown-payment conflict) and must re-resolve when the
+// parks (records / unknown-entry conflict) and must re-resolve when the
 // target lands later. No stuck voided=0, no stuck IOU state, either order.
 import { describe, it } from 'bun:test';
 import assert from 'node:assert/strict';
@@ -24,11 +24,11 @@ function mkEv(o: {
 }
 
 describe('out-of-order resurrection', () => {
-  it('undo before payment still voids when the target arrives', async () => {
+  it('undo before entry still voids when the target arrives', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-reorder-'));
     const pay = mkEv({
-      id: 'pay-early-undo', seq: 2, type: 'payment', actor: 'budi',
-      ts: 2, payload: { amount: 75000, actor: 'budi' }, prev: 'h1',
+      id: 'pay-early-undo', seq: 2, type: 'entry', actor: 'budi',
+      ts: 2, payload: { value: 75000, actor: 'budi' }, prev: 'h1',
     });
     const undo = mkEv({
       id: 'undo-early', seq: 1, type: 'undo.compensate', actor: 'budi',
@@ -40,46 +40,46 @@ describe('out-of-order resurrection', () => {
     try {
       const res = await k.sync(relay, { chunkSize: 10, ...fast });
       assert.equal(res.applied, 2);
-      const rows = await k.query<{ voided: number }>(`SELECT voided FROM payment WHERE event_id = 'pay-early-undo'`);
+      const rows = await k.query<{ voided: number }>(`SELECT voided FROM entries WHERE event_id = 'pay-early-undo'`);
       assert.equal(rows.length, 1);
       assert.equal(rows[0].voided, 1);
-      const totals = await k.query<{ total: number }>(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+      const totals = await k.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
       assert.equal(totals[0].total, null);
     } finally {
       k.close();
     }
   }, 30_000);
 
-  it('settle before payment still settles when the target arrives', async () => {
+  it('resolve before entry still resolves when the target arrives', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-reorder-'));
     const pay = mkEv({
-      id: 'pay-late', seq: 2, type: 'payment', actor: 'budi',
-      ts: 2, payload: { amount: 90000, actor: 'budi' }, prev: 'h1',
+      id: 'pay-late', seq: 2, type: 'entry', actor: 'budi',
+      ts: 2, payload: { value: 90000, actor: 'budi' }, prev: 'h1',
     });
-    const settle = mkEv({
-      id: 'settle-early', seq: 1, type: 'payment.settled', actor: 'server',
+    const resolveEv = mkEv({
+      id: 'resolve-early', seq: 1, type: 'entry.resolved', actor: 'server',
       ts: 1, payload: { event_id: 'pay-late' }, prev: 'GENESIS',
     });
     const relay = new MemoryRelay();
-    await relay.push([settle, pay]);
+    await relay.push([resolveEv, pay]);
     const k = await createKernel({ file: join(dir, 'ledger.db') });
     try {
       const res = await k.sync(relay, { chunkSize: 10, ...fast });
       assert.equal(res.applied, 2);
-      const rows = await k.query<{ state: string }>(`SELECT state FROM payment WHERE event_id = 'pay-late'`);
-      assert.equal(rows[0].state, 'SETTLED_ONLINE');
-      const open = await k.query(`SELECT * FROM conflicts WHERE status = 'open' AND kind = 'unknown-payment'`);
+      const rows = await k.query<{ state: string }>(`SELECT state FROM entries WHERE event_id = 'pay-late'`);
+      assert.equal(rows[0].state, 'RESOLVED_ONLINE');
+      const open = await k.query(`SELECT * FROM conflicts WHERE status = 'open' AND kind = 'unknown-entry'`);
       assert.equal(open.length, 0);
     } finally {
       k.close();
     }
   }, 30_000);
 
-  it('in-order arrival still converges (no double-void, no double-settle)', async () => {
+  it('in-order arrival still converges (no double-void, no double-resolve)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-reorder-'));
     const pay = mkEv({
-      id: 'pay-ordered', seq: 1, type: 'payment', actor: 'budi',
-      ts: 1, payload: { amount: 60000, actor: 'budi' }, prev: 'GENESIS',
+      id: 'pay-ordered', seq: 1, type: 'entry', actor: 'budi',
+      ts: 1, payload: { value: 60000, actor: 'budi' }, prev: 'GENESIS',
     });
     const undo = mkEv({
       id: 'undo-ordered', seq: 2, type: 'undo.compensate', actor: 'budi',
@@ -91,7 +91,7 @@ describe('out-of-order resurrection', () => {
     try {
       const res = await k.sync(relay, { chunkSize: 10, ...fast });
       assert.equal(res.applied, 2);
-      const rows = await k.query<{ voided: number }>(`SELECT voided FROM payment WHERE event_id = 'pay-ordered'`);
+      const rows = await k.query<{ voided: number }>(`SELECT voided FROM entries WHERE event_id = 'pay-ordered'`);
       assert.equal(rows[0].voided, 1);
     } finally {
       k.close();

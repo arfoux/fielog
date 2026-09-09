@@ -14,7 +14,7 @@ const per: number[] = [];
 const t0 = performance.now();
 for (let i = 0; i < N; i++) {
   const a = performance.now();
-  await kernel.append({ type: 'payment', amount: 1000 + (i % 9000), actor: 'bench' });
+  await kernel.append({ type: 'entry', value: 1000 + (i % 9000), actor: 'bench' });
   per.push(performance.now() - a);
 }
 const secs = (performance.now() - t0) / 1000;

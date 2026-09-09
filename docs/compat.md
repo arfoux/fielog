@@ -26,7 +26,7 @@ Rules for any new event field:
 ## proof
 
 `test/compat-v05.test.ts`: opens the v0.5 fixture in a fresh kernel,
-checks `verifyLog()`, replays into the read-model (payment total 40000,
+checks `verifyLog()`, replays into the read-model (entry total 40000,
 kopi stock 97), appends seq 6 chained on the fixture tip, then asserts
 every written line carries all v0.5 fields, no unknown fields, and
 hash-verifies with optional fields stripped.

@@ -21,14 +21,14 @@ Device-signed relay tokens (`CapToken`) plus authority-signed scope grants
 
 `ScopeGrant` (`src/auth.ts`): `{ id, deviceId, scopes, issuedBy, issuedAt,
 expiresAt, signature? }`, signed by the authority key over
-`canonicalGrant`. Payment scopes live here, not in `CapToken`.
+`canonicalGrant`. Entry scopes live here, not in `CapToken`.
 
 ## scope
 
 - Relay ops gate on `relay:push` / `relay:pull` via `verifyCapToken` /
   `authorizeCapToken`. A `relay:push`-only token is rejected for `relay:pull`.
-- Payment ops gate on `payment:append` / `payment:settle` via `verifyGrant` /
-  `authorizeGrant`. The grant path is the live authorize path for payment
+- Entry ops gate on `entries:append` / `entries:resolve` via `verifyGrant` /
+  `authorizeGrant`. The grant path is the live authorize path for entry
   scopes — grants are no longer call-site-free.
 - Authorize order in `authorizeCapToken`: device tombstone → per-token-id
   revocation → signature → expiry → scope. Revoked callers never reach crypto.

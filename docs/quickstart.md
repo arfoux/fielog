@@ -9,15 +9,15 @@ Every snippet below runs as-is.
 import { createKernel } from 'fielog';
 
 const k = await createKernel({ file: 'ledger.db' });
-await k.append({ type: 'payment', amount: 5000, actor: 'device-01' });
-const rows = await k.query('SELECT SUM(amount) AS total FROM payment WHERE voided = 0');
-console.log(rows[0].total); // 5000 — IOU_RECORDED state, not settled
+await k.append({ type: 'entry', value: 5000, actor: 'device-01' });
+const rows = await k.query('SELECT SUM(value) AS total FROM entries WHERE voided = 0');
+console.log(rows[0].total); // 5000 — RECORDED state, not resolved
 k.close();
 ```
 
 No network at all: `append`/`query`/`undo` never touch the network
 (`src/kernel.ts`). Offline money is always recorded as
-`IOU_RECORDED`; `PAID_OFFLINE` / arbitrary `state` is rejected by `checkAppend`.
+`RECORDED`; `PAID_OFFLINE` / arbitrary `state` is rejected by `checkAppend`.
 
 ## 2 phones: sync later via a local relay (dev, unsigned)
 
@@ -28,12 +28,12 @@ const server = new WsRelayServer({ port: 8091, file: 'relay.log' });
 await server.start();
 const node1 = await createKernel({ file: 'device-01.db' });
 const node2 = await createKernel({ file: 'device-02.db' });
-await node1.append({ type: 'payment', amount: 5000, actor: 'device-01' });
+await node1.append({ type: 'entry', value: 5000, actor: 'device-01' });
 const c1 = new WsRelayClient('ws://127.0.0.1:8091');
 const c2 = new WsRelayClient('ws://127.0.0.1:8091');
 await node1.sync(c1);
 await node2.sync(c2);
-const t = await node2.query('SELECT SUM(amount) AS total FROM payment WHERE voided = 0');
+const t = await node2.query('SELECT SUM(value) AS total FROM entries WHERE voided = 0');
 console.log(t[0].total); // 5000 — moved via relay
 c1.close();
 c2.close();

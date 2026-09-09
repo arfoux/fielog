@@ -35,7 +35,7 @@ interface PullResult { pulled: number; applied: number; quarantined: number }
 interface SyncOpts {
   chunkSize?: number; maxRetries?: number; baseMs?: number; maxMs?: number;
   trustedDevices?: Map<string,string> | Record<string,string>; // non-empty = verify every pulled event
-  highValue?: { limit: number; threshold: number };             // payment >= limit needs threshold countersign
+  highValue?: { limit: number; threshold: number };             // entry >= limit needs threshold countersign
   revokedDevices?: Set<string> | string[]; isRevoked?: (ev: LogEvent) => boolean;
   revokeVersion?: string | number;                              // version stamp so the incremental sweep knows when to rescan
   jitter?: boolean | number | (() => number);                   // default false = deterministic

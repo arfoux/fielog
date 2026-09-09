@@ -50,8 +50,8 @@ const n = Number(process.env.DRILL_N!);
 const { createKernel } = await import(process.cwd() + '/src/kernel.ts');
 const k = await createKernel({ file: dir + '/ledger.db', deviceId: 'cold-drill' });
 let expected = 0;
-for (let i = 0; i < n; i++) { expected += 1000 + i; await k.append({ type: 'payment', amount: 1000 + i, actor: 'cold-drill' }); }
-const rows = await k.query<{ total: number }>('SELECT SUM(amount) AS total FROM payment WHERE voided = 0');
+for (let i = 0; i < n; i++) { expected += 1000 + i; await k.append({ type: 'entry', value: 1000 + i, actor: 'cold-drill' }); }
+const rows = await k.query<{ total: number }>('SELECT SUM(value) AS total FROM entries WHERE voided = 0');
 const v: any = k.verifyLog();
 console.log(`BEFORE events=${k.health().events} total=${rows[0].total} expected=${expected} verify=${v.ok ? 'ok' : 'FAIL'}`);
 const events = k.health().events;
@@ -64,7 +64,7 @@ const dir = process.env.DRILL_DIR!;
 const n = Number(process.env.DRILL_N!);
 const { createKernel } = await import(process.cwd() + '/src/kernel.ts');
 const k = await createKernel({ file: dir + '/ledger.db', deviceId: 'cold-drill' });
-const rows = await k.query<{ total: number }>('SELECT SUM(amount) AS total FROM payment WHERE voided = 0');
+const rows = await k.query<{ total: number }>('SELECT SUM(value) AS total FROM entries WHERE voided = 0');
 const v: any = k.verifyLog();
 let expected = 0;
 for (let i = 0; i < n; i++) expected += 1000 + i;

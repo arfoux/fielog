@@ -4,7 +4,7 @@
 
 # fielog — Fieldlog
 
-Write anywhere, settle later.
+Write anywhere, resolve later.
 
 Offline-first primitives for apps that must survive bank-down, blank-spot,
 blackout: append-only log (source of truth) + SQLite read-model + sync-later.
@@ -13,13 +13,13 @@ blackout: append-only log (source of truth) + SQLite read-model + sync-later.
 import { createKernel } from 'fielog';
 
 const k = await createKernel({ file: 'ledger.db' });
-await k.append({ type: 'payment', amount: 5000, actor: 'device-01' });
-const rows = await k.query('SELECT SUM(amount) AS total FROM payment WHERE voided = 0');
-console.log(rows[0].total); // 5000 — IOU_RECORDED, not settled
+await k.append({ type: 'entry', value: 5000, actor: 'device-01' });
+const rows = await k.query('SELECT SUM(value) AS total FROM entries WHERE voided = 0');
+console.log(rows[0].total); // 5000 — RECORDED, not resolved
 k.close();
 ```
 
-Offline money is always recorded as `IOU_RECORDED`; settlement needs an online
+Offline money is always recorded as `RECORDED`; resolution needs an online
 ack. `append`/`query`/`undo` never touch the network — only `sync` does.
 
 ## Getting started

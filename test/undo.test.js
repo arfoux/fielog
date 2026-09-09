@@ -15,13 +15,13 @@ describe('undo compensating event', () => {
   });
   afterEach(() => k?.close());
 
-  it('voids a payment without deleting history', async () => {
-    const first = await k.append({ type: 'payment', amount: 50000, actor: 'budi' });
-    await k.append({ type: 'payment', amount: 25000, actor: 'ani' });
+  it('voids a entry without deleting history', async () => {
+    const first = await k.append({ type: 'entry', value: 50000, actor: 'budi' });
+    await k.append({ type: 'entry', value: 25000, actor: 'ani' });
     const undo = await k.undo(first.id, 'budi');
     assert.equal(undo.type, 'undo.compensate');
 
-    const rows = await k.query(`SELECT SUM(amount) AS total FROM payment WHERE voided = 0`);
+    const rows = await k.query(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
     assert.equal(rows[0].total, 25000);
 
     // Original line retained in the log and the store.
