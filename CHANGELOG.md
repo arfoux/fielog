@@ -4,7 +4,7 @@ All entries describe user-visible changes shipped under each tag, in tag order.
 Untagged commits are folded into the next tag that shipped them.
 
 
-## Unreleased (v0.13.0) — audit + perf waves, docs topikal
+## v0.14.27 — audit + perf waves, docs, gallery
 
 - Docs: README jadi pintu + indeks; isi per topik satu-concern (install,
   quickstart, architecture, kernel-api, sync-protocol, relay, retention,
@@ -18,6 +18,7 @@ Untagged commits are folded into the next tag that shipped them.
 - Perf: relay liveBuf dedupes via persistent Set, token verdicts cached per revoke size; `purgeRevoked` incremental via `sync.purge_seq` cursor + fingerprint; backoff jitter deterministic by default (opt-in random).
 - Suite: 218 tests green, tsc clean.
 
+- Galeri: 8 APNG explainer + logo di README (docs/gifs/, luar tarball).
 ## v0.1.0 — offline kernel
 
 - Initial release: offline-first `createKernel({ file })` with `append` / `query` / `undo`, no network needed for local writes.
