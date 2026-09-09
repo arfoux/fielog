@@ -1,8 +1,8 @@
 # corpus generator
 
 Port of skill-10 (`corpus-generator`, status HEALTHY) to fielog.
-One seeded function emits a fixed op mix — `entry` / `stock.add` /
-`stock.sell` / `undo.compensate` — with deterministic ids, so the same
+One seeded function emits a fixed op mix — `entry` / `tally.add` /
+`tally.remove` / `undo.compensate` — with deterministic ids, so the same
 `(seed, n)` always yields byte-identical JSONL. The corpus feeds soak,
 fuzz, and model-oracle spins without re-inventing a generator per spin.
 
@@ -40,8 +40,8 @@ first event, so `undo` always has a target):
 | op | share | effect |
 | --- | --- | --- |
 | `entry` | ~50% | value `100 + floor(rng()*4900)`, actor from `device-a/b/c` |
-| `stock.add` | ~20% | item from `kopi/gula/beras`, qty 1..20 |
-| `stock.sell` | ~15% | same items, qty 1..10 (oversell parks, oracle mirrors it) |
+| `tally.add` | ~20% | item from `kopi/gula/beras`, qty 1..20 |
+| `tally.remove` | ~15% | same items, qty 1..10 (underflow parks, oracle mirrors it) |
 | `undo.compensate` | ~15% | `reverses` = random earlier corpus id (unknown/voided targets park) |
 
 Ids are `corpus-<seed>-<i>` (deterministic, content-addressable). The
@@ -57,29 +57,40 @@ kernel ids; undo targets resolve through the same map.
 - Test pins it: same seed twice = `deepEqual` + equal sha; seed 42 vs
   43 diverge; seed normalizes to uint32.
 
-## Run evidence (2026-09-06, base d03e683 = v0.14.13)
+## Run evidence (2026-09-06, base d03e683 = v0.14.13, pre-tally-rename)
 
 ```text
 $ bun test test/corpus-gen.test.ts
 [corpus-gen] determinism seed=42 n=200 sha=ca7311f769ba
-[corpus-gen] replay seed=42 n=200 sha=ca7311f769ba entry=97 add=40 sell=27 undo=36 verify=ok
+[corpus-gen] replay seed=42 n=200 sha=ca7311f769ba entry=97 add=40 remove=27 undo=36 verify=ok
  4 pass, 0 fail (3.46s)
 ```
 
 ```text
 $ bun scripts/corpus-gen.ts --seed 42 --n 200 --out /tmp/corpus-proof
-[corpus-gen] seed=42 n=200 sha=ca7311f769ba entry=97 add=40 sell=27 undo=36
+[corpus-gen] seed=42 n=200 sha=ca7311f769ba entry=97 add=40 remove=27 undo=36
 [corpus-gen] wrote corpus-42-200.jsonl + corpus-42-200.manifest.json
 ```
 
+Post-rename re-measure (v0.14.27, 2026-09-10 — op types only, same seed/n):
+
+```text
+$ bun scripts/corpus-gen.ts --seed 42 --n 200 --out /tmp/corpus-tally
+[corpus-gen] seed=42 n=200 sha=d022597d5078 entry=97 add=40 remove=27 undo=36
+[corpus-gen] wrote corpus-42-200.jsonl + corpus-42-200.manifest.json
+```
+
+Same distribution (`entry=97 add=40 remove=27 undo=36`); only the sha moves,
+byte-identically, with the `tally.add` / `tally.remove` type strings.
+
 Replay (in-test, 200 events through `createKernel` + shared `Oracle` +
-`checkOracle`): per-actor and stock balances match, `verifyLog` clean.
+`checkOracle`): per-actor and tally balances match, `verifyLog` clean.
 
 ## limits (by design)
 
 - Single device, offline ops only: no `sync`/`restart` interleaving
   (those live in `soak-runner`), no multi-writer conflicts.
-- No `resolve`/`entry.*` ops: money-state transitions are covered by
+- No `resolve`/`entry.*` ops: entry-state transitions are covered by
   `model-oracle` / `model-fuzz`.
 - Phase-2 (merge + tag) is never done by this script; the coordinator
   acts via its own inbox.

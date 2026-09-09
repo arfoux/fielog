@@ -93,7 +93,7 @@ describe('flfix-small audit suspects', () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-flfix-hide-'));
     const k = await createKernel({ file: join(dir, 'ledger.db') });
     closers.push(() => k.close());
-    const a = await k.append({ type: 'note', payload: { isi: 'struk-1' } });
+    const a = await k.append({ type: 'note', payload: { content: 'note-1' } });
     const before = k.health().events;
     // Unknown target: throws before appending, so no poison line is left.
     // (Check-then-append is documented non-atomic: concurrent writers must
@@ -144,7 +144,7 @@ describe('flfix-small audit suspects', () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-flfix-hash-'));
     const c = openHashChain(join(dir, 'rantang.log'), 'dev-1', (ev) => `sig-${ev.hash}`);
     try {
-      const e = c.append({ type: 'catat', payload: { n: 1 } });
+      const e = c.append({ type: 'note', payload: { n: 1 } });
       assert.equal(e.signature, `sig-${e.hash}`);
       assert.deepEqual(c.verify(), { ok: true });
     } finally {

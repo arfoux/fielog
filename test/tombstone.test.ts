@@ -53,8 +53,8 @@ describe('tombstone', () => {
   it('hide folds in seq order and show lifts', () => {
     const { store, done } = memStore();
     closers.push(done);
-    store.apply(mkEv(1, 't1', 'note', { isi: 'a' }));
-    store.apply(mkEv(2, 't2', 'note', { isi: 'b' }));
+    store.apply(mkEv(1, 't1', 'note', { content: 'a' }));
+    store.apply(mkEv(2, 't2', 'note', { content: 'b' }));
     store.apply(mkEv(3, 'h1', TOMBSTONE_HIDE, { hides: 't1' }));
     store.apply(mkEv(4, 'h2', TOMBSTONE_HIDE, { hides: 't2' }));
     assert.deepEqual([...hiddenIds(store)].sort(), ['t1', 't2']);
@@ -137,8 +137,8 @@ describe('tombstone', () => {
     const file = join(dir, 'ledger.db');
     const k = await createKernel({ file });
     closers.push(() => k.close());
-    const a = await k.append({ type: 'note', payload: { isi: 'struk-1' } });
-    await k.append({ type: 'note', payload: { isi: 'struk-2' } });
+    const a = await k.append({ type: 'note', payload: { content: 'note-1' } });
+    await k.append({ type: 'note', payload: { content: 'note-2' } });
     await hide(k, a.id, { reason: 'wrong value input' });
     assert.equal(k.health().events, 3);
     // Target line stays in the log; the tombstone parks beside it.
@@ -172,7 +172,7 @@ describe('tombstone', () => {
     const kb = await createKernel({ file: join(dir, 'b.db') });
     closers.push(() => ka.close(), () => kb.close());
     const relay = new MemoryRelay();
-    const rec = await ka.append({ type: 'note', payload: { isi: 'nota' } });
+    const rec = await ka.append({ type: 'note', payload: { content: 'note-3' } });
     await ka.sync(relay, { ...fast });
     await kb.sync(relay, { ...fast });
     const seen = await kb.query<{ n: number }>(`SELECT COUNT(*) AS n FROM _events WHERE id = ?`, [rec.id]);

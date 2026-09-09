@@ -6,7 +6,7 @@
 bun install
 bun test            # full suite (218 tests when this doc was written)
 bun run build       # typecheck via tsc -p tsconfig.json
-bun bin/fielog.ts demo   # end-to-end smoke: 2-phone kasir
+bun bin/fielog.ts demo   # end-to-end smoke: 2-node roundtrip
 ```
 
 Requires: `bun` >= 1.0 (see [docs/install](docs/install.md)).

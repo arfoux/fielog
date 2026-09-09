@@ -16,7 +16,7 @@ describe('hash-chain-log', () => {
 
     // (1) Append N, verify OK.
     const c1 = openHashChain(path, 'hp-uji');
-    for (let i = 0; i < N; i++) c1.append({ type: 'catat', payload: { n: i } });
+    for (let i = 0; i < N; i++) c1.append({ type: 'note', payload: { n: i } });
     assert.equal(c1.readAll().length, N);
     assert.deepEqual(c1.verify(), { ok: true });
     assert.deepEqual(verifyChain(c1.readAll()), { ok: true });
@@ -24,7 +24,7 @@ describe('hash-chain-log', () => {
 
     // (2) Corrupt 1 mid-file line (seq CORRUPT_SEQ).
     const lines = readFileSync(path, 'utf8').split('\n');
-    lines[CORRUPT_SEQ - 1] = '{"type":"catat","n":BROKEN';
+    lines[CORRUPT_SEQ - 1] = '{"type":"note","n":BROKEN';
     writeFileSync(path, lines.join('\n'));
 
     // (3) Reopen quarantines it; verify re-anchors the survivor.
@@ -36,7 +36,7 @@ describe('hash-chain-log', () => {
       assert.ok(existsSync(quarantinePathFor(path)));
 
       // (4) Re-anchor: append resumes from the live tip, chain stays OK.
-      const tail = c2.append({ type: 'catat', payload: { n: N } });
+      const tail = c2.append({ type: 'note', payload: { n: N } });
       assert.equal(tail.seq, N + 1);
       assert.equal(tail.prev_hash, c2.readAll()[c2.readAll().length - 2].hash);
       const v = c2.verify();
@@ -62,8 +62,8 @@ describe('hash-chain-log', () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-hashchain-'));
     const c = openHashChain(join(dir, 'rantang.log'), 'hp-uji');
     try {
-      c.append({ type: 'catat', payload: { n: 1 } });
-      c.append({ type: 'catat', payload: { n: 2 } });
+      c.append({ type: 'note', payload: { n: 1 } });
+      c.append({ type: 'note', payload: { n: 2 } });
       const evs = c.readAll();
       const tampered = [{ ...evs[0], payload: { n: 999 } }, evs[1]];
       assert.equal(verifyChain(tampered).ok, false);

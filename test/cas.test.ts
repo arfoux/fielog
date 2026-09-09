@@ -31,19 +31,19 @@ describe('cas-store', () => {
   it('put returns sha256 key, get round-trips bytes', () => {
     const c = openCas(freshDir('roundtrip'));
     closers.push(() => c.close());
-    const key = c.put('struk-001:rp25000');
-    assert.equal(key, casKeyFor('struk-001:rp25000'));
+    const key = c.put('doc-001:00000');
+    assert.equal(key, casKeyFor('doc-001:00000'));
     assert.equal(key.length, 64);
     assert.ok(c.has(key));
-    assert.equal(c.get(key)?.toString(), 'struk-001:rp25000');
-    assert.deepEqual(c.stat(key), { key, size: 17, refcount: 1 });
+    assert.equal(c.get(key)?.toString(), 'doc-001:00000');
+    assert.deepEqual(c.stat(key), { key, size: 13, refcount: 1 });
   });
 
   it('dedup: same bytes twice share one blob with refcount 2', () => {
     const c = openCas(freshDir('dedup'));
     closers.push(() => c.close());
-    const k1 = c.put('photo-struk');
-    const k2 = c.put('photo-struk');
+    const k1 = c.put('photo-001');
+    const k2 = c.put('photo-001');
     assert.equal(k1, k2);
     assert.equal(c.stat(k1)?.refcount, 2);
     assert.equal(c.unlink(k1), false); // 2 -> 1, blob lives
@@ -56,7 +56,7 @@ describe('cas-store', () => {
   it('link adds a ref, unlink of unknown key throws', () => {
     const c = openCas(freshDir('link'));
     closers.push(() => c.close());
-    const key = c.put('nota');
+    const key = c.put('doc-002');
     c.link(key);
     assert.equal(c.stat(key)?.refcount, 2);
     assert.throws(() => c.link('0'.repeat(64)), /unknown cas key/);

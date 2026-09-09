@@ -22,7 +22,7 @@ function usage(): string {
     '  sync --file <ledger.db> --relay <ws url> --key <priv.pem> --as <device>',
     '    push+pull the kernel delta with a capability token',
     '  sync --file <ledger.db> --relay <ws url> --unsigned   unsigned (dev only)',
-    '  demo   two-node: offline sales, then signed-mode sync with matching totals',
+    '  demo   two-node: offline events, then signed-mode sync with matching totals',
   ].join('\n');
 }
 

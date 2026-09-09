@@ -25,7 +25,7 @@ the rig scenarios live in `test/two-device-rig.test.ts`.
 
 | id | name | convergence evidence |
 |---|---|---|
-| s1 | device-01 sells offline, device-02 pulls until equal | both-side total = sum of n events; re-sync `applied=0` |
+| s1 | device-01 appends offline, device-02 pulls until equal | both-side total = sum of n events; re-sync `applied=0` |
 | s2 | two-way offline collision then converge | both-side total = combined sum of 10+10 events |
 | s3 | relay drops mid-batch then resumes | `relay.size=n` (exact-once by uuid); device-02 total = sum of n events |
 

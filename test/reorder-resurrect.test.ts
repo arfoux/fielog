@@ -98,28 +98,28 @@ describe('out-of-order resurrection', () => {
     }
   }, 30_000);
 
-  it('undo before stock.sell restores stock when the sell lands', async () => {
+  it('undo before tally.remove restores tally when the remove lands', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fielog-reorder-'));
     const add = mkEv({
-      id: 'add-1', seq: 1, type: 'stock.add', ts: 1,
+      id: 'add-1', seq: 1, type: 'tally.add', ts: 1,
       payload: { item: 'kopi', qty: 10 }, prev: 'GENESIS',
     });
-    const sell = mkEv({
-      id: 'sell-1', seq: 3, type: 'stock.sell', ts: 3,
+    const remove = mkEv({
+      id: 'remove-1', seq: 3, type: 'tally.remove', ts: 3,
       payload: { item: 'kopi', qty: 4 }, prev: 'h2',
     });
     const undo = mkEv({
-      id: 'undo-sell-1', seq: 2, type: 'undo.compensate', ts: 2,
-      payload: { reverses: 'sell-1' }, prev: 'h1',
+      id: 'undo-remove-1', seq: 2, type: 'undo.compensate', ts: 2,
+      payload: { reverses: 'remove-1' }, prev: 'h1',
     });
     const relay = new MemoryRelay();
-    await relay.push([add, undo, sell]);
+    await relay.push([add, undo, remove]);
     const k = await createKernel({ file: join(dir, 'ledger.db') });
     try {
       await k.sync(relay, { chunkSize: 10, ...fast });
-      const stock = await k.query<{ qty: number }>(`SELECT qty FROM stock WHERE item = 'kopi'`);
-      assert.equal(stock[0].qty, 10);
-      const moves = await k.query<{ voided: number }>(`SELECT voided FROM stock_moves WHERE event_id = 'sell-1'`);
+      const tally = await k.query<{ qty: number }>(`SELECT qty FROM tally WHERE item = 'kopi'`);
+      assert.equal(tally[0].qty, 10);
+      const moves = await k.query<{ voided: number }>(`SELECT voided FROM tally_moves WHERE event_id = 'remove-1'`);
       assert.equal(moves[0].voided, 1);
     } finally {
       k.close();

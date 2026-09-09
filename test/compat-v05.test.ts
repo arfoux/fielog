@@ -49,8 +49,8 @@ describe('compat v05 log', () => {
     );
     assert.equal(entry[0].n, 2);
     assert.equal(entry[0].total, 40000);
-    const stock = await k.query<{ qty: number }>(`SELECT qty FROM stock WHERE item = 'kopi'`);
-    assert.equal(stock[0].qty, 97);
+    const tally = await k.query<{ qty: number }>(`SELECT qty FROM tally WHERE item = 'kopi'`);
+    assert.equal(tally[0].qty, 97);
   });
 
   it('append continues the v05 chain (seq + prev_hash)', async () => {

@@ -1,9 +1,10 @@
 # quickstart
 
-Two runnable patterns: one phone offline, then two phones syncing via relay.
+Two runnable patterns: one device offline, then two devices syncing via relay
+(phones, game clients, sensors, servers — the ledger entry below is one domain).
 Every snippet below runs as-is.
 
-## 1 phone: write offline, read locally
+## 1 device: write offline, read locally
 
 ```js
 import { createKernel } from 'fielog';
@@ -16,10 +17,11 @@ k.close();
 ```
 
 No network at all: `append`/`query`/`undo` never touch the network
-(`src/kernel.ts`). Offline money is always recorded as
-`RECORDED`; `PAID_OFFLINE` / arbitrary `state` is rejected by `checkAppend`.
+(`src/kernel.ts`). Offline writes are always stored as `RECORDED`;
+`PAID_OFFLINE` / arbitrary `state` is rejected by `checkAppend` — sync/ack
+decides resolution, never the offline writer.
 
-## 2 phones: sync later via a local relay (dev, unsigned)
+## 2 devices: sync later via a local relay (dev, unsigned)
 
 ```js
 import { createKernel, WsRelayServer, WsRelayClient } from 'fielog';
@@ -42,10 +44,10 @@ node2.close();
 server.kill();
 ```
 
-The full 20-transaction example is in `demo/two-node.ts`
+The full 20-event example is in `demo/two-node.ts`
 (run via `bun run demo`).
 
-## 2 phones: signed mode (production)
+## 2 devices: signed mode (production)
 
 Open relays are for local dev only. Production: serve registers each device's
 pubkey, sync carries a capability token (`bin/fielog.ts`):

@@ -80,11 +80,11 @@ export function checkAppend(type: string, payload: Record<string, unknown>): voi
         `entry rejected: state '${state}' cannot be recorded offline (use DRAFT or RECORDED; resolution needs online ack)`,
       );
     }
-  } else if (type === 'stock.add') {
-    if (!String(p['item']) || !Number.isFinite(Number(p['qty']))) throw new Error('stock.add needs {item, qty}');
-  } else if (type === 'stock.sell') {
+  } else if (type === 'tally.add') {
+    if (!String(p['item']) || !Number.isFinite(Number(p['qty']))) throw new Error('tally.add needs {item, qty}');
+  } else if (type === 'tally.remove') {
     if (!String(p['item']) || !Number.isFinite(Number(p['qty'])) || Number(p['qty']) <= 0) {
-      throw new Error('stock.sell needs {item, qty>0}');
+      throw new Error('tally.remove needs {item, qty>0}');
     }
   }
 }
@@ -119,11 +119,11 @@ CREATE TABLE IF NOT EXISTS entries(
   state TEXT NOT NULL,
   voided INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS stock(
+CREATE TABLE IF NOT EXISTS tally(
   item TEXT PRIMARY KEY,
   qty INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS stock_moves(
+CREATE TABLE IF NOT EXISTS tally_moves(
   seq INTEGER PRIMARY KEY,
   event_id TEXT UNIQUE NOT NULL,
   item TEXT NOT NULL,
@@ -250,15 +250,15 @@ export function openStore(path: string): EventStore {
       }
       const m = all<{ item: string; qty: number; voided: number }>(
         db,
-        `SELECT item, qty, voided FROM stock_moves WHERE event_id = ?`,
+        `SELECT item, qty, voided FROM tally_moves WHERE event_id = ?`,
         target,
       );
       if (m.length && !m[0].voided) {
-        run(db, `UPDATE stock_moves SET voided = 1 WHERE event_id = ?`, target);
+        run(db, `UPDATE tally_moves SET voided = 1 WHERE event_id = ?`, target);
         run(
           db,
-          `INSERT INTO stock(item,qty) VALUES(?,?)
-           ON CONFLICT(item) DO UPDATE SET qty = stock.qty + excluded.qty`,
+          `INSERT INTO tally(item,qty) VALUES(?,?)
+           ON CONFLICT(item) DO UPDATE SET qty = tally.qty + excluded.qty`,
           m[0].item,
           -m[0].qty,
         );
@@ -371,38 +371,38 @@ export function openStore(path: string): EventStore {
         run(db, `UPDATE entries SET state = ? WHERE event_id = ?`, next, target);
         break;
       }
-      case 'stock.add': {
+      case 'tally.add': {
         checkAppend(ev.type, p);
         const item = String(p['item']);
         const qty = Number(p['qty']);
         run(
           db,
-          `INSERT INTO stock(item,qty) VALUES(?,?)
-           ON CONFLICT(item) DO UPDATE SET qty = stock.qty + excluded.qty`,
+          `INSERT INTO tally(item,qty) VALUES(?,?)
+           ON CONFLICT(item) DO UPDATE SET qty = tally.qty + excluded.qty`,
           item,
           qty,
         );
-        run(db, `INSERT INTO stock_moves(seq,event_id,item,qty,voided) VALUES(?,?,?, ?,0)`, ev.seq, ev.id, item, qty);
+        run(db, `INSERT INTO tally_moves(seq,event_id,item,qty,voided) VALUES(?,?,?, ?,0)`, ev.seq, ev.id, item, qty);
         resolvePendingUndos(ev.id);
         break;
       }
-      case 'stock.sell': {
+      case 'tally.remove': {
         checkAppend(ev.type, p);
         const item = String(p['item']);
         const qty = Number(p['qty']);
-        const rows = all<{ qty: number }>(db, `SELECT qty FROM stock WHERE item = ?`, item);
+        const rows = all<{ qty: number }>(db, `SELECT qty FROM tally WHERE item = ?`, item);
         const onHand = rows.length ? rows[0].qty : 0;
         if (qty > onHand) {
-          // Contended stock: explicit conflict row, move parked as voided. Never silent LWW.
-          run(db, `INSERT INTO stock_moves(seq,event_id,item,qty,voided) VALUES(?,?,?,? ,1)`, ev.seq, ev.id, item, -qty);
+          // Contended tally: explicit conflict row, move parked as voided. Never silent LWW.
+          run(db, `INSERT INTO tally_moves(seq,event_id,item,qty,voided) VALUES(?,?,?,? ,1)`, ev.seq, ev.id, item, -qty);
           addConflict(
-            'oversell',
-            `sell ${qty}×${item} with ${onHand} on hand (event ${ev.id})`,
+            'underflow',
+            `remove ${qty}×${item} with ${onHand} on hand (event ${ev.id})`,
             [ev.id],
           );
         } else {
-          run(db, `UPDATE stock SET qty = qty - ? WHERE item = ?`, qty, item);
-          run(db, `INSERT INTO stock_moves(seq,event_id,item,qty,voided) VALUES(?,?,?, ?,0)`, ev.seq, ev.id, item, -qty);
+          run(db, `UPDATE tally SET qty = qty - ? WHERE item = ?`, qty, item);
+          run(db, `INSERT INTO tally_moves(seq,event_id,item,qty,voided) VALUES(?,?,?, ?,0)`, ev.seq, ev.id, item, -qty);
         }
         resolvePendingUndos(ev.id);
         break;
@@ -416,16 +416,16 @@ export function openStore(path: string): EventStore {
         }
         const m = all<{ item: string; qty: number; voided: number }>(
           db,
-          `SELECT item, qty, voided FROM stock_moves WHERE event_id = ?`,
+          `SELECT item, qty, voided FROM tally_moves WHERE event_id = ?`,
           target,
         );
         if (m.length && !m[0].voided) {
-          run(db, `UPDATE stock_moves SET voided = 1 WHERE event_id = ?`, target);
+          run(db, `UPDATE tally_moves SET voided = 1 WHERE event_id = ?`, target);
           // Reverse the physical effect: moves store signed qty, so subtract it back.
           run(
             db,
-            `INSERT INTO stock(item,qty) VALUES(?,?)
-             ON CONFLICT(item) DO UPDATE SET qty = stock.qty + excluded.qty`,
+            `INSERT INTO tally(item,qty) VALUES(?,?)
+             ON CONFLICT(item) DO UPDATE SET qty = tally.qty + excluded.qty`,
             m[0].item,
             -m[0].qty,
           );
@@ -465,15 +465,15 @@ export function openStore(path: string): EventStore {
           raw.length ? JSON.stringify(raw[0]) : r.id,
         );
         run(db, `DELETE FROM entries WHERE event_id = ?`, r.id);
-        const m = all<{ n: number }>(db, `SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = ?`, r.id);
-        run(db, `DELETE FROM stock_moves WHERE event_id = ?`, r.id);
+        const m = all<{ n: number }>(db, `SELECT COUNT(*) AS n FROM tally_moves WHERE event_id = ?`, r.id);
+        run(db, `DELETE FROM tally_moves WHERE event_id = ?`, r.id);
         run(db, `DELETE FROM records WHERE event_id = ?`, r.id);
         if ((m[0]?.n ?? 0) > 0) {
           // Balances derive from moves: rebuild atomically with the purge.
-          db.exec(`DELETE FROM stock`);
+          db.exec(`DELETE FROM tally`);
           run(
             db,
-            `INSERT INTO stock(item, qty) SELECT item, SUM(qty) FROM stock_moves WHERE voided = 0 GROUP BY item`,
+            `INSERT INTO tally(item, qty) SELECT item, SUM(qty) FROM tally_moves WHERE voided = 0 GROUP BY item`,
           );
         }
         db.exec('COMMIT');
@@ -546,24 +546,24 @@ export function openStore(path: string): EventStore {
       if (gone.length === 0) return 0;
       // One transaction: a failure mid-sweep (disk, lock, trigger) rolls the
       // whole excise back instead of leaving half-deleted views behind, and
-      // the stock rebuild below commits atomically with the deletes above.
+      // the tally rebuild below commits atomically with the deletes above.
       db.exec('BEGIN IMMEDIATE');
       try {
         let moves = 0;
         for (const g of gone) {
           run(db, `DELETE FROM entries WHERE event_id = ?`, g.id);
-          const m = all<{ n: number }>(db, `SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = ?`, g.id);
+          const m = all<{ n: number }>(db, `SELECT COUNT(*) AS n FROM tally_moves WHERE event_id = ?`, g.id);
           if (m[0]?.n) moves += 1;
-          run(db, `DELETE FROM stock_moves WHERE event_id = ?`, g.id);
+          run(db, `DELETE FROM tally_moves WHERE event_id = ?`, g.id);
           run(db, `DELETE FROM records WHERE event_id = ?`, g.id);
           run(db, `DELETE FROM _events WHERE id = ?`, g.id);
         }
         if (moves > 0) {
-          // Balances derive from moves: rebuild so excised stock stops counting.
-          db.exec('DELETE FROM stock');
+          // Balances derive from moves: rebuild so excised tally stops counting.
+          db.exec('DELETE FROM tally');
           run(
             db,
-            `INSERT INTO stock(item, qty) SELECT item, SUM(qty) FROM stock_moves WHERE voided = 0 GROUP BY item`,
+            `INSERT INTO tally(item, qty) SELECT item, SUM(qty) FROM tally_moves WHERE voided = 0 GROUP BY item`,
           );
         }
         db.exec('COMMIT');

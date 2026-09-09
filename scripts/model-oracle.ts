@@ -1,12 +1,12 @@
-// model-oracle: plain-arithmetic mirror of store.ts routing (entry/stock/undo only).
+// model-oracle: plain-arithmetic mirror of store.ts routing (entry/tally/undo only).
 // import from test/model-oracle.test.ts; canonical copy lives here, not inline.
 export class Oracle {
   pay = new Map<string, number>(); // actor -> live value sum
   amt = new Map<string, number>(); // entry id -> value
   who = new Map<string, string>(); // entry id -> actor
   stk = new Map<string, number>(); // item -> qty on hand
-  mov = new Map<string, { i: string; q: number }>(); // live stock move -> signed qty
-  void = new Set<string>(); // voided entry + stock ids (oversell parks included)
+  mov = new Map<string, { i: string; q: number }>(); // live tally move -> signed qty
+  void = new Set<string>(); // voided entry + tally ids (underflow parks included)
   pend = new Set<string>(); // undo targets not yet seen (records-parked)
   entry(id: string, n: number, a: string): void {
     this.amt.set(id, n); this.who.set(id, a);
@@ -18,8 +18,8 @@ export class Oracle {
     this.stk.set(item, (this.stk.get(item) ?? 0) + q);
     this.mov.set(id, { i: item, q });
   }
-  sell(id: string, item: string, q: number): void {
-    if ((this.stk.get(item) ?? 0) < q) { this.void.add(id); return; } // oversell park
+  remove(id: string, item: string, q: number): void {
+    if ((this.stk.get(item) ?? 0) < q) { this.void.add(id); return; } // underflow park
     if (this.pend.has(id)) { this.pend.delete(id); this.void.add(id); return; }
     this.stk.set(item, (this.stk.get(item) ?? 0) - q);
     this.mov.set(id, { i: item, q: -q });
@@ -44,10 +44,10 @@ export async function checkOracle(
   const { default: assert } = await import('node:assert/strict');
   const payR = await q(`SELECT actor, SUM(value) AS t FROM entries WHERE voided = 0 GROUP BY actor`);
   const pay = new Map(payR.map((r) => [String(r.actor), Number(r.t)] as [string, number]));
-  const stkR = await q(`SELECT item, qty FROM stock`);
+  const stkR = await q(`SELECT item, qty FROM tally`);
   const stk = new Map(stkR.map((r) => [String(r.item), Number(r.qty)] as [string, number]));
   const voidR = await q(
-    `SELECT event_id FROM entries WHERE voided = 1 UNION ALL SELECT event_id FROM stock_moves WHERE voided = 1`);
+    `SELECT event_id FROM entries WHERE voided = 1 UNION ALL SELECT event_id FROM tally_moves WHERE voided = 1`);
   const norm = (m: Map<string, number>) =>
     new Map([...m].filter(([, v]) => v !== 0));
   const loud = (what: string, exp: unknown, got: unknown) =>

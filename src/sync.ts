@@ -230,7 +230,7 @@ function verifyPullAuth(remote: LogEvent, registry: Map<string, string> | null, 
 // the `_quarantine` table (sqlite, alongside the read-model) and skipped past
 // the pull cursor like a dead-letter, so sync never converges blindly on
 // tainted data. Data that converged BEFORE the revoke arrived is purged from
-// the domain read views (entries/stock_moves/records) by purgeRevoked; the log
+// the domain read views (entries/tally_moves/records) by purgeRevoked; the log
 // line and the `_events` row stay so reopen replay (idempotent by UUID) cannot
 // resurrect the rows and forensics keeps the bytes.
 export interface QuarantineRow {
@@ -299,8 +299,8 @@ export function listQuarantine(store: EventStore): QuarantineRow[] {
 function quarantineOne(store: EventStore, ev: LogEvent, reason: string): boolean {
   ensureQuarantine(store);
   const known = store.query(`SELECT 1 AS n FROM _quarantine WHERE event_id = ? LIMIT 1`, [ev.id]).length > 0;
-  const moves = store.query<{ n: number }>(`SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = ?`, [ev.id]);
-  // Atomic like store.apply: evidence row + view purges + stock rebuild commit
+  const moves = store.query<{ n: number }>(`SELECT COUNT(*) AS n FROM tally_moves WHERE event_id = ?`, [ev.id]);
+  // Atomic like store.apply: evidence row + view purges + tally rebuild commit
   // together, so a kill mid-quarantine can neither lose evidence nor leave
   // half-purged views. Same connection via store.exec, never nested inside
   // another tx (callers only invoke this after apply rolled back).
@@ -313,12 +313,12 @@ function quarantineOne(store: EventStore, ev: LogEvent, reason: string): boolean
       JSON.stringify(ev),
     ]);
     store.query(`DELETE FROM entries WHERE event_id = ?`, [ev.id]);
-    store.query(`DELETE FROM stock_moves WHERE event_id = ?`, [ev.id]);
+    store.query(`DELETE FROM tally_moves WHERE event_id = ?`, [ev.id]);
     store.query(`DELETE FROM records WHERE event_id = ?`, [ev.id]);
     if ((moves[0]?.n ?? 0) > 0) {
-      // Balances derive from moves: rebuild so quarantined stock stops counting.
-      store.exec(`DELETE FROM stock`);
-      store.exec(`INSERT INTO stock(item, qty) SELECT item, SUM(qty) FROM stock_moves WHERE voided = 0 GROUP BY item`);
+      // Balances derive from moves: rebuild so quarantined tally stops counting.
+      store.exec(`DELETE FROM tally`);
+      store.exec(`INSERT INTO tally(item, qty) SELECT item, SUM(qty) FROM tally_moves WHERE voided = 0 GROUP BY item`);
     }
     store.exec('COMMIT');
   } catch (err) {

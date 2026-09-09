@@ -1,6 +1,6 @@
 // demo/two-node.ts — run: bun demo/two-node.ts
-// Two nodes, one relay: device-01 sells 20x fully offline, then both sync
-// and prove identical totals on both sides.
+// Two nodes, one relay: device-01 records 20 events fully offline, then both
+// sync and prove identical totals on both sides.
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,7 +14,7 @@ console.log(`relay at ${dir} port 8091`);
 const node1 = await createKernel({ file: join(dir, 'device-01.db') });
 const node2 = await createKernel({ file: join(dir, 'device-02.db') });
 
-// 20 offline transactions on device-01: no network at all.
+// 20 offline events on device-01: no network at all.
 let expected = 0;
 for (let i = 0; i < 20; i++) {
   const value = 5000 + i * 250;

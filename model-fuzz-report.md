@@ -1,5 +1,11 @@
 # model-fuzz report (money truth)
 
+> Note (v0.14.27 tally rename): current event types are `tally.add` /
+> `tally.remove` (tables `tally` / `tally_moves`, conflict kind `underflow`
+> with `remove N×item with M on hand` detail). The body below is the original
+> historical record and is kept verbatim — read `stock.add` / `stock.sell` /
+> `stock_moves` / `oversell` / `sell N×item` there as the pre-rename names.
+
 base proof: full suite green before the change (64 pass, 0 fail, 102s).
 after: full suite green with fuzz added (66 pass, 0 fail, 198s).
 fuzz alone: 2 pass, 0 fail, 112s (seed 20260906 + unseeded seed 365736147 / 1147118171).

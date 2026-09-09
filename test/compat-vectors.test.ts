@@ -25,13 +25,13 @@ interface Fixture {
   events: number;
   entryN: number;
   entryTotal: number;
-  stockItem: string;
-  stockQty: number;
+  tallyItem: string;
+  tallyQty: number;
 }
 
 const FIXTURES: Fixture[] = [
-  { file: 'ledger-minimal.log', events: 5, entryN: 2, entryTotal: 40000, stockItem: 'kopi', stockQty: 97 },
-  { file: 'ledger-actor.log', events: 4, entryN: 2, entryTotal: 15000, stockItem: 'gula', stockQty: 47 },
+  { file: 'ledger-minimal.log', events: 5, entryN: 2, entryTotal: 40000, tallyItem: 'kopi', tallyQty: 97 },
+  { file: 'ledger-actor.log', events: 4, entryN: 2, entryTotal: 15000, tallyItem: 'gula', tallyQty: 47 },
 ];
 
 const rawLines = (f: Fixture): string[] =>
@@ -98,8 +98,8 @@ describe('compat vectors (healthy set)', () => {
       );
       assert.equal(entry[0].n, f.entryN);
       assert.equal(entry[0].total, f.entryTotal);
-      const stock = await k.query<{ qty: number }>(`SELECT qty FROM stock WHERE item = ?`, [f.stockItem]);
-      assert.equal(stock[0].qty, f.stockQty);
+      const tally = await k.query<{ qty: number }>(`SELECT qty FROM tally WHERE item = ?`, [f.tallyItem]);
+      assert.equal(tally[0].qty, f.tallyQty);
     }
   });
 

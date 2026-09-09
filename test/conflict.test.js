@@ -15,18 +15,18 @@ describe('conflict surfacing', () => {
   });
   afterEach(() => k?.close());
 
-  it('double-sell beyond stock surfaces a conflict row', async () => {
-    await k.append({ type: 'stock.add', payload: { item: 'beras', qty: 5 } });
-    await k.append({ type: 'stock.sell', payload: { item: 'beras', qty: 4 } });
-    await k.append({ type: 'stock.sell', payload: { item: 'beras', qty: 4 } }); // contended
+  it('double-remove beyond tally surfaces a conflict row', async () => {
+    await k.append({ type: 'tally.add', payload: { item: 'beras', qty: 5 } });
+    await k.append({ type: 'tally.remove', payload: { item: 'beras', qty: 4 } });
+    await k.append({ type: 'tally.remove', payload: { item: 'beras', qty: 4 } }); // contended
 
     const conflicts = await k.conflicts();
     assert.equal(conflicts.length, 1);
-    assert.equal(conflicts[0].kind, 'oversell');
+    assert.equal(conflicts[0].kind, 'underflow');
 
-    // Stock never goes negative; the loser is parked, not applied.
-    const stock = await k.query(`SELECT qty FROM stock WHERE item = 'beras'`);
-    assert.equal(stock[0].qty, 1);
+    // Tally never goes negative; the loser is parked, not applied.
+    const tally = await k.query(`SELECT qty FROM tally WHERE item = 'beras'`);
+    assert.equal(tally[0].qty, 1);
   });
 
   it('double-resolve on money surfaces a conflict row', async () => {

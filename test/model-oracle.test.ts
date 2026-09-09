@@ -42,17 +42,17 @@ async function runOracle(seed: number): Promise<void> {
       } else if (r < 0.55) {
         const item = pick(ITEMS);
         const qty = 1 + Math.floor(rng() * 20);
-        const ev = await k.append({ type: 'stock.add', item, qty });
+        const ev = await k.append({ type: 'tally.add', item, qty });
         o.add(ev.id, item, qty);
         known.push(ev.id);
-        op = `stock.add ${ev.id} item=${item} qty=${qty}`;
+        op = `tally.add ${ev.id} item=${item} qty=${qty}`;
       } else if (r < 0.65) {
         const item = pick(ITEMS);
         const qty = 1 + Math.floor(rng() * 10);
-        const ev = await k.append({ type: 'stock.sell', item, qty });
-        o.sell(ev.id, item, qty);
+        const ev = await k.append({ type: 'tally.remove', item, qty });
+        o.remove(ev.id, item, qty);
         known.push(ev.id);
-        op = `stock.sell ${ev.id} item=${item} qty=${qty}`;
+        op = `tally.remove ${ev.id} item=${item} qty=${qty}`;
       } else if (r < 0.8) {
         const target = rng() < 0.1 ? `no-such-${Math.floor(rng() * 1e9)}` : pick(known);
         await k.undo(target, 'oracle');

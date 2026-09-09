@@ -1,6 +1,6 @@
 // corpus-gen: deterministic synthetic corpus for fielog spins.
 // Port of skill-10 (corpus-generator, status HEALTHY): seeded mulberry32 emits
-// a fixed op mix (entry / stock.add / stock.sell / undo.compensate) with
+// a fixed op mix (entry / tally.add / tally.remove / undo.compensate) with
 // deterministic ids, so the same (seed, n) always yields byte-identical JSONL.
 // Library (genCorpus/corpusSha/writeCorpus) + CLI (bun scripts/corpus-gen.ts).
 import { createHash } from 'node:crypto';
@@ -25,7 +25,7 @@ export interface CorpusManifest {
   seed: number;
   n: number;
   sha: string;
-  counts: { entry: number; add: number; sell: number; undo: number };
+  counts: { entry: number; add: number; remove: number; undo: number };
 }
 
 const ACTORS = ['device-a', 'device-b', 'device-c'];
@@ -48,12 +48,12 @@ export function genCorpus(seed: number, n: number): Corpus {
     } else if (r < 0.7) {
       const item = pick(ITEMS);
       const qty = 1 + Math.floor(rng() * 20);
-      events.push({ id, type: 'stock.add', payload: { item, qty }, actor: 'gudang' });
+      events.push({ id, type: 'tally.add', payload: { item, qty }, actor: 'gudang' });
       known.push(id);
     } else if (r < 0.85) {
       const item = pick(ITEMS);
       const qty = 1 + Math.floor(rng() * 10);
-      events.push({ id, type: 'stock.sell', payload: { item, qty }, actor: 'device-a' });
+      events.push({ id, type: 'tally.remove', payload: { item, qty }, actor: 'device-a' });
       known.push(id);
     } else {
       const reverses = known[Math.floor(rng() * known.length)];
@@ -76,11 +76,11 @@ export function corpusSha(c: Corpus): string {
 }
 
 export function corpusManifest(c: Corpus): CorpusManifest {
-  const counts = { entry: 0, add: 0, sell: 0, undo: 0 };
+  const counts = { entry: 0, add: 0, remove: 0, undo: 0 };
   for (const e of c.events) {
     if (e.type === 'entry') counts.entry += 1;
-    else if (e.type === 'stock.add') counts.add += 1;
-    else if (e.type === 'stock.sell') counts.sell += 1;
+    else if (e.type === 'tally.add') counts.add += 1;
+    else if (e.type === 'tally.remove') counts.remove += 1;
     else counts.undo += 1;
   }
   return { seed: c.seed, n: c.n, sha: corpusSha(c), counts };
@@ -129,7 +129,7 @@ if (direct) {
   const paths = writeCorpus(c, out);
   console.log(
     `[corpus-gen] seed=${m.seed} n=${m.n} sha=${m.sha.slice(0, 12)} ` +
-      `entry=${m.counts.entry} add=${m.counts.add} sell=${m.counts.sell} undo=${m.counts.undo}`,
+      `entry=${m.counts.entry} add=${m.counts.add} remove=${m.counts.remove} undo=${m.counts.undo}`,
   );
   console.log(`[corpus-gen] wrote ${paths.jsonl} + ${paths.manifest}`);
 }

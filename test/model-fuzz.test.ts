@@ -1,7 +1,7 @@
 // model-fuzz: in-memory oracle vs kernel over 5000 seeded mixed ops.
-// ops (applied identically to both): append entry, stock.add/sell, undo,
+// ops (applied identically to both): append entry, tally.add/remove, undo,
 // kill-respawn, sync, replay. state compared every 100 steps: per-actor live
-// sums + stock qty per item + full voided id set vs SELECT SUM/voided.
+// sums + tally qty per item + full voided id set vs SELECT SUM/voided.
 // mismatch fails loudly with seed + step + op log. MemoryRelay only.
 import { describe, it } from 'bun:test';
 import assert from 'node:assert/strict';
@@ -12,14 +12,14 @@ import { createKernel, type Kernel } from '../src/kernel.ts';
 import { MemoryRelay } from '../src/sync.ts';
 import { mulberry32 } from '../src/relay.ts';
 
-// oracle: plain-arithmetic mirror of store.ts routing (entry/stock/undo only).
+// oracle: plain-arithmetic mirror of store.ts routing (entry/tally/undo only).
 class Oracle {
   pay = new Map<string, number>(); // actor -> live value sum
   nom = new Map<string, number>(); // entry id -> value
   who = new Map<string, string>(); // entry id -> actor
   stk = new Map<string, number>(); // item -> qty on hand
-  mov = new Map<string, { i: string; q: number }>(); // live stock move -> signed qty
-  void = new Set<string>(); // voided entry + stock ids (oversell parks included)
+  mov = new Map<string, { i: string; q: number }>(); // live tally move -> signed qty
+  void = new Set<string>(); // voided entry + tally ids (underflow parks included)
   pend = new Set<string>(); // undo targets not yet seen (records-parked)
   entry(id: string, n: number, o: string): void {
     this.nom.set(id, n); this.who.set(id, o);
@@ -31,8 +31,8 @@ class Oracle {
     this.stk.set(item, (this.stk.get(item) ?? 0) + q);
     this.mov.set(id, { i: item, q });
   }
-  sell(id: string, item: string, q: number): void {
-    if ((this.stk.get(item) ?? 0) < q) { this.void.add(id); return; } // oversell park
+  remove(id: string, item: string, q: number): void {
+    if ((this.stk.get(item) ?? 0) < q) { this.void.add(id); return; } // underflow park
     if (this.pend.has(id)) { this.pend.delete(id); this.void.add(id); return; }
     this.stk.set(item, (this.stk.get(item) ?? 0) - q);
     this.mov.set(id, { i: item, q: -q });
@@ -65,15 +65,15 @@ async function check(seed: number, step: number, op: string, k: Kernel, o: Oracl
   const payRows = await k.query<{ actor: string; t: number }>(
     `SELECT actor, SUM(value) AS t FROM entries WHERE voided = 0 GROUP BY actor`);
   const pay = new Map(payRows.map((r) => [String(r.actor), Number(r.t)] as [string, number]));
-  const stockRows = await k.query<{ item: string; qty: number }>(`SELECT item, qty FROM stock`);
-  const stk = new Map(stockRows.map((r) => [String(r.item), Number(r.qty)] as [string, number]));
+  const tallyRows = await k.query<{ item: string; qty: number }>(`SELECT item, qty FROM tally`);
+  const stk = new Map(tallyRows.map((r) => [String(r.item), Number(r.qty)] as [string, number]));
   const voidRows = await k.query<{ event_id: string }>(
-    `SELECT event_id FROM entries WHERE voided = 1 UNION ALL SELECT event_id FROM stock_moves WHERE voided = 1`);
+    `SELECT event_id FROM entries WHERE voided = 1 UNION ALL SELECT event_id FROM tally_moves WHERE voided = 1`);
   const tail = log.slice(-80).join('\n');
   const loud = (what: string, exp: unknown, got: unknown) =>
     `${ctx} MISMATCH ${what}\nexpected=${JSON.stringify(exp)}\nactual=${JSON.stringify(got)}\n--- last ops ---\n${tail}`;
   assert.deepEqual(norm(pay), norm(o.pay), loud('per-actor balances', [...norm(o.pay)], [...norm(pay)]));
-  assert.deepEqual(norm(stk), norm(o.stk), loud('stock balances', [...norm(o.stk)], [...norm(stk)]));
+  assert.deepEqual(norm(stk), norm(o.stk), loud('tally balances', [...norm(o.stk)], [...norm(stk)]));
   assert.deepEqual(new Set(voidRows.map((r) => String(r.event_id))), o.void,
     loud('voided ids', [...o.void].sort(), voidRows.map((r) => String(r.event_id)).sort()));
 }
@@ -103,17 +103,17 @@ async function runFuzz(seed: number): Promise<void> {
       } else if (r < 0.52) {
         const item = pick(ITEMS);
         const qty = 1 + Math.floor(rng() * 20);
-        const ev = await k.append({ type: 'stock.add', item, qty });
+        const ev = await k.append({ type: 'tally.add', item, qty });
         o.add(ev.id, item, qty);
         known.push(ev.id);
-        op = `stock.add ${ev.id} item=${item} qty=${qty}`;
+        op = `tally.add ${ev.id} item=${item} qty=${qty}`;
       } else if (r < 0.62) {
         const item = pick(ITEMS);
         const qty = 1 + Math.floor(rng() * 10);
-        const ev = await k.append({ type: 'stock.sell', item, qty });
-        o.sell(ev.id, item, qty);
+        const ev = await k.append({ type: 'tally.remove', item, qty });
+        o.remove(ev.id, item, qty);
         known.push(ev.id);
-        op = `stock.sell ${ev.id} item=${item} qty=${qty}`;
+        op = `tally.remove ${ev.id} item=${item} qty=${qty}`;
       } else if (r < 0.74) {
         const target = rng() < 0.1 ? `no-such-${Math.floor(rng() * 1e9)}` : pick(known);
         await k.undo(target, 'fuzz');

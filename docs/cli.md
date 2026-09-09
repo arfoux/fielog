@@ -51,9 +51,10 @@ bun bin/fielog.ts sync --file ./ledger.db --relay ws://127.0.0.1:8091 --unsigned
 
 ## `demo` — two-node (no flags)
 
-`bun bin/fielog.ts demo`: 20 offline sales on device-01, two-sided signed-mode sync,
-then proves `device-01 == device-02 == expected`, else exit 1
-(`cmdDemo`). Output: `sync: device-01 = ... | device-02 = ... | expected = ...` and
+`bun bin/fielog.ts demo`: 20 offline events on device-01 (ledger entries in
+this demo), two-sided signed-mode sync, then proves
+`device-01 == device-02 == expected`, else exit 1 (`cmdDemo`). Output:
+`sync: device-01 = ... | device-02 = ... | expected = ...` and
 `match on both sides, totals agree`.
 
 ## exit code

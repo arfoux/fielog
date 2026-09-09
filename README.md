@@ -1,13 +1,15 @@
 <p align="center">
-  <img src="docs/gifs/logo.svg" alt="fielog logo — ledger slip with verification stamp" width="128">
+  <img src="docs/gifs/logo.svg" alt="fielog logo — event log with verification stamp" width="128">
 </p>
 
 # fielog — Fieldlog
 
 Write anywhere, resolve later.
 
-Offline-first primitives for apps that must survive bank-down, blank-spot,
-blackout: append-only log (source of truth) + SQLite read-model + sync-later.
+Offline-first event log for apps that keep writing through outages and
+sync later: append-only log (source of truth) + SQLite read-model + sync-later.
+Works for game events, file versions, telemetry samples — a ledger entry
+(below) is one domain, not the whole story.
 
 ```js
 import { createKernel } from 'fielog';
@@ -19,13 +21,15 @@ console.log(rows[0].total); // 5000 — RECORDED, not resolved
 k.close();
 ```
 
-Offline money is always recorded as `RECORDED`; resolution needs an online
-ack. `append`/`query`/`undo` never touch the network — only `sync` does.
+Offline writes are always stored as `RECORDED`; sync/ack happens when online.
+`append`/`query`/`undo` never touch the network — only `sync` does. Any event
+shape is stored and synced; the read-model projects `entry` / `tally` / `undo`
+into queryable tables.
 
 ## Getting started
 
 - [install](docs/install.md) — requirements (`bun` >= 1.0), setup, files created
-- [quickstart](docs/quickstart.md) — 1 phone offline, 2 phones syncing (dev + signed mode), runnable
+- [quickstart](docs/quickstart.md) — 1 device offline, 2 devices syncing (dev + signed mode), runnable
 - [cli](docs/cli.md) — `serve` / `sync` / `demo`, every flag verified against `bin/fielog.ts`
 - Real examples: `demo/two-node.ts` (`bun run demo`), `example/ledger.mjs` (`bun example/ledger.mjs`)
 
@@ -34,7 +38,7 @@ ack. `append`/`query`/`undo` never touch the network — only `sync` does.
 | | |
 |---|---|
 | <img src="docs/gifs/part1-log.png" alt="hash chain" width="480"><br>hash chain — every append seals to the previous entry | <img src="docs/gifs/part2-sync.png" alt="delta sync" width="480"><br>delta sync — only the diff flies, resuming from the last ack |
-| <img src="docs/gifs/part3-relay.png" alt="relay" width="480"><br>relay — blind phones exchange messages via the server | <img src="docs/gifs/part4-retain.png" alt="snapshot+truncate" width="480"><br>snapshot+truncate — trim the log without losing the trail |
+| <img src="docs/gifs/part3-relay.png" alt="relay" width="480"><br>relay — offline devices exchange messages via the server | <img src="docs/gifs/part4-retain.png" alt="snapshot+truncate" width="480"><br>snapshot+truncate — trim the log without losing the trail |
 | <img src="docs/gifs/part5-auth.png" alt="capability+revoke" width="480"><br>capability+revoke — signed tokens, ruthless revocation | <img src="docs/gifs/part6-quarantine.png" alt="quarantine" width="480"><br>quarantine — corrupt entries jailed, never silently dropped |
 | <img src="docs/gifs/part7-readmodel.png" alt="read model" width="480"><br>read model — SQLite rebuilt from the log | <img src="docs/gifs/part8-tombstone.png" alt="soft delete" width="480"><br>soft delete — delete = tombstone, history stays intact |
 

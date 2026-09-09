@@ -35,7 +35,7 @@ describe('corpus-gen replay', () => {
     const c = genCorpus(42, 200);
     const m = corpusManifest(c);
     assert.equal(m.n, 200);
-    assert.equal(m.counts.entry + m.counts.add + m.counts.sell + m.counts.undo, 200);
+    assert.equal(m.counts.entry + m.counts.add + m.counts.remove + m.counts.undo, 200);
     const dir = mkdtempSync(join(tmpdir(), 'fielog-corpus-gen-'));
     const k = await createKernel({ file: join(dir, 'ledger.db') });
     try {
@@ -50,14 +50,14 @@ describe('corpus-gen replay', () => {
           const ev = await k.append({ type: 'entry', value: e.payload['value'], actor: e.payload['actor'] });
           idMap.set(e.id, ev.id);
           o.entry(ev.id, Number(e.payload['value']), String(e.payload['actor']));
-        } else if (e.type === 'stock.add') {
-          const ev = await k.append({ type: 'stock.add', payload: { item: e.payload['item'], qty: e.payload['qty'] } });
+        } else if (e.type === 'tally.add') {
+          const ev = await k.append({ type: 'tally.add', payload: { item: e.payload['item'], qty: e.payload['qty'] } });
           idMap.set(e.id, ev.id);
           o.add(ev.id, String(e.payload['item']), Number(e.payload['qty']));
-        } else if (e.type === 'stock.sell') {
-          const ev = await k.append({ type: 'stock.sell', payload: { item: e.payload['item'], qty: e.payload['qty'] } });
+        } else if (e.type === 'tally.remove') {
+          const ev = await k.append({ type: 'tally.remove', payload: { item: e.payload['item'], qty: e.payload['qty'] } });
           idMap.set(e.id, ev.id);
-          o.sell(ev.id, String(e.payload['item']), Number(e.payload['qty']));
+          o.remove(ev.id, String(e.payload['item']), Number(e.payload['qty']));
         } else {
           const target = idMap.get(String(e.payload['reverses'])) ?? String(e.payload['reverses']);
           const ev = await k.append({ type: 'undo.compensate', payload: { reverses: target } });
@@ -69,7 +69,7 @@ describe('corpus-gen replay', () => {
       assert.deepEqual(k.verifyLog(), { ok: true });
       console.log(
         `[corpus-gen] replay seed=42 n=200 sha=${m.sha.slice(0, 12)} ` +
-          `entry=${m.counts.entry} add=${m.counts.add} sell=${m.counts.sell} undo=${m.counts.undo} verify=ok`,
+          `entry=${m.counts.entry} add=${m.counts.add} remove=${m.counts.remove} undo=${m.counts.undo} verify=ok`,
       );
     } finally {
       k.close();

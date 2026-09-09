@@ -62,17 +62,17 @@ describe('flfix store audit', () => {
 
   it('(3) duplicate conflict swallowed, disk/locking-class errors rethrown', () => {
     const s = track(openStore(':memory:'));
-    const e1 = ev({ id: 'flfix-cf-1', seq: 1, type: 'stock.sell', payload: { item: 'kopi', qty: 5 } });
-    s.apply(e1); // oversell with nothing on hand -> conflict row
+    const e1 = ev({ id: 'flfix-cf-1', seq: 1, type: 'tally.remove', payload: { item: 'kopi', qty: 5 } });
+    s.apply(e1); // underflow with nothing on hand -> conflict row
     s.exec(`DELETE FROM _events WHERE id = 'flfix-cf-1'`);
-    s.exec(`DELETE FROM stock_moves WHERE event_id = 'flfix-cf-1'`);
+    s.exec(`DELETE FROM tally_moves WHERE event_id = 'flfix-cf-1'`);
     const r = s.replay([e1]); // same conflict id re-applied: must not throw
     assert.equal(r.skipped, 0);
     assert.equal(r.applied, 1);
 
     const s2 = track(openStore(':memory:'));
     s2.exec(`DROP TABLE conflicts`); // every addConflict now hits a real storage error
-    const e2 = ev({ id: 'flfix-cf-2', seq: 1, type: 'stock.sell', payload: { item: 'kopi', qty: 5 } });
+    const e2 = ev({ id: 'flfix-cf-2', seq: 1, type: 'tally.remove', payload: { item: 'kopi', qty: 5 } });
     assert.throws(() => s2.apply(e2), /no such table/i);
     assert.equal(s2.hasId('flfix-cf-2'), false);
   });
@@ -95,12 +95,12 @@ describe('flfix store audit', () => {
   it('(5) exciseMissing is atomic: mid-sweep failure rolls everything back', () => {
     const s = track(openStore(':memory:'));
     const b = ev({ id: 'flfix-ex-b', seq: 1, type: 'entry', payload: { value: 100, actor: 'k' } });
-    const a = ev({ id: 'flfix-ex-a', seq: 2, type: 'stock.add', payload: { item: 'kopi', qty: 10 } });
+    const a = ev({ id: 'flfix-ex-a', seq: 2, type: 'tally.add', payload: { item: 'kopi', qty: 10 } });
     s.apply(b);
     s.apply(a);
-    // Fail the final stock rebuild: every per-row delete has already run, so
+    // Fail the final tally rebuild: every per-row delete has already run, so
     // without a transaction the sweep is left half-deleted.
-    s.exec(`CREATE TRIGGER flfix_boom BEFORE DELETE ON stock BEGIN SELECT RAISE(ABORT, 'flfix-boom'); END;`);
+    s.exec(`CREATE TRIGGER flfix_boom BEFORE DELETE ON tally BEGIN SELECT RAISE(ABORT, 'flfix-boom'); END;`);
     assert.throws(() => s.exciseMissing([], 0), /flfix-boom/);
     s.exec(`DROP TRIGGER flfix_boom`);
     // All-or-nothing: the rows excised before the failure must have rolled back.
@@ -108,10 +108,10 @@ describe('flfix store audit', () => {
     assert.equal(s.hasId('flfix-ex-a'), true);
     assert.equal(s.query<{ n: number }>(`SELECT COUNT(*) AS n FROM entries WHERE event_id = 'flfix-ex-b'`)[0].n, 1);
     assert.equal(
-      s.query<{ n: number }>(`SELECT COUNT(*) AS n FROM stock_moves WHERE event_id = 'flfix-ex-a'`)[0].n,
+      s.query<{ n: number }>(`SELECT COUNT(*) AS n FROM tally_moves WHERE event_id = 'flfix-ex-a'`)[0].n,
       1,
     );
-    assert.equal(s.query<{ q: number }>(`SELECT qty AS q FROM stock WHERE item = 'kopi'`)[0].q, 10);
+    assert.equal(s.query<{ q: number }>(`SELECT qty AS q FROM tally WHERE item = 'kopi'`)[0].q, 10);
     // A clean re-run still converges.
     assert.equal(s.exciseMissing([], 0), 2);
     assert.equal(s.hasId('flfix-ex-b'), false);

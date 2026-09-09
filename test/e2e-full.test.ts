@@ -95,32 +95,32 @@ describe('fielog full journey', () => {
       assert.equal(k.ackSeq(), 600);
       assert.equal(serverA.size, 600);
 
-      // Phase 3: undo flows — void 25 entry and 15 stock sells, history stays.
+      // Phase 3: undo flows — void 25 entry and 15 tally removes, history stays.
       const entryIds = (
         await k.query<{ event_id: string }>(`SELECT event_id FROM entries ORDER BY seq`)
       ).map((r) => r.event_id);
-      const sellIds = (
-        await k.query<{ event_id: string }>(`SELECT event_id FROM stock_moves WHERE qty < 0 AND voided = 0 ORDER BY seq`)
+      const removeIds = (
+        await k.query<{ event_id: string }>(`SELECT event_id FROM tally_moves WHERE qty < 0 AND voided = 0 ORDER BY seq`)
       ).map((r) => r.event_id);
-      assert.ok(entryIds.length > 100 && sellIds.length >= 15);
+      assert.ok(entryIds.length > 100 && removeIds.length >= 15);
       const undoEntry = [8, 38, 68, 98, 128, 158, 188, 218, 248, 278, 308, 338, 368, 398, 428, 458, 488, 518, 548, 568, 578, 588, 594, 597, 599]
         .map((n) => entryIds[n % entryIds.length]);
-      const undoSell = [3, 11, 19, 27, 35, 43, 51, 59, 67, 75, 83, 91, 99, 107, 115].map((n) => sellIds[n % sellIds.length]);
+      const undoRemove = [3, 11, 19, 27, 35, 43, 51, 59, 67, 75, 83, 91, 99, 107, 115].map((n) => removeIds[n % removeIds.length]);
       const actors = ['device-1', 'device-2', 'device-3'];
       let n = 0;
-      for (const id of [...undoEntry, ...undoSell]) await k.undo(id, actors[n++ % actors.length]);
+      for (const id of [...undoEntry, ...undoRemove]) await k.undo(id, actors[n++ % actors.length]);
       assert.equal(k.health().events, 640);
 
-      // Undo intent mirror: voided values leave the total, sells come back.
+      // Undo intent mirror: voided values leave the total, removes come back.
       let undoneValue = 0;
       for (const id of undoEntry) {
         const rows = await k.query<{ value: number }>(`SELECT value FROM entries WHERE event_id = $id`, { id });
         undoneValue += rows[0].value;
       }
-      let restoredStock = 0;
-      for (const id of undoSell) {
-        const rows = await k.query<{ qty: number }>(`SELECT qty FROM stock_moves WHERE event_id = $id`, { id });
-        restoredStock += -rows[0].qty;
+      let restoredTally = 0;
+      for (const id of undoRemove) {
+        const rows = await k.query<{ qty: number }>(`SELECT qty FROM tally_moves WHERE event_id = $id`, { id });
+        restoredTally += -rows[0].qty;
       }
 
       // Phase 4: fill to exactly 1000 durable events.
@@ -131,9 +131,9 @@ describe('fielog full journey', () => {
       const base = mirrorFor([0, 600]);
       const tail = mirrorFor([600, 960]);
       const expectEntry = base.entryTotal + tail.entryTotal - undoneValue;
-      const expectStock: Record<string, number> = {};
-      for (const m of [base, tail]) for (const [item, qty] of Object.entries(m.stock)) expectStock[item] = (expectStock[item] ?? 0) + qty;
-      expectStock['kopi'] = (expectStock['kopi'] ?? 0) + restoredStock;
+      const expectTally: Record<string, number> = {};
+      for (const m of [base, tail]) for (const [item, qty] of Object.entries(m.tally)) expectTally[item] = (expectTally[item] ?? 0) + qty;
+      expectTally['kopi'] = (expectTally['kopi'] ?? 0) + restoredTally;
 
       // Phase 5: kill the primary mid-stream, finish via the secondary.
       serverA.kill();
@@ -158,9 +158,9 @@ describe('fielog full journey', () => {
       // Local totals match the mirror before the revoke probe.
       const rows = await k.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
       assert.equal(rows[0].total, expectEntry);
-      for (const [item, qty] of Object.entries(expectStock)) {
-        const srows = await k.query<{ qty: number }>(`SELECT qty FROM stock WHERE item = $item`, { item });
-        assert.equal(srows[0]?.qty ?? 0, qty, `stock ${item} mismatch`);
+      for (const [item, qty] of Object.entries(expectTally)) {
+        const srows = await k.query<{ qty: number }>(`SELECT qty FROM tally WHERE item = $item`, { item });
+        assert.equal(srows[0]?.qty ?? 0, qty, `tally ${item} mismatch`);
       }
       assert.deepEqual(await k.conflicts(), []);
       const vf = k.verifyLog() as { ok: boolean; gaps?: number[] };
@@ -191,9 +191,9 @@ describe('fielog full journey', () => {
       assert.equal(down.applied, TOTAL);
       const kbRows = await kb.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
       assert.equal(kbRows[0].total, expectEntry); // probe 777 never left the revoked device
-      for (const [item, qty] of Object.entries(expectStock)) {
-        const srows = await kb.query<{ qty: number }>(`SELECT qty FROM stock WHERE item = $item`, { item });
-        assert.equal(srows[0]?.qty ?? 0, qty, `peer stock ${item} mismatch`);
+      for (const [item, qty] of Object.entries(expectTally)) {
+        const srows = await kb.query<{ qty: number }>(`SELECT qty FROM tally WHERE item = $item`, { item });
+        assert.equal(srows[0]?.qty ?? 0, qty, `peer tally ${item} mismatch`);
       }
       assert.deepEqual(await kb.conflicts(), []);
       void probe;

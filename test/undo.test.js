@@ -31,11 +31,11 @@ describe('undo compensating event', () => {
     assert.equal(comp[0].n, 1);
   });
 
-  it('restores stock on sell undo', async () => {
-    await k.append({ type: 'stock.add', payload: { item: 'kopi', qty: 10 } });
-    const sell = await k.append({ type: 'stock.sell', payload: { item: 'kopi', qty: 4 } });
-    await k.undo(sell.id);
-    const rows = await k.query(`SELECT qty FROM stock WHERE item = 'kopi'`);
+  it('restores tally on remove undo', async () => {
+    await k.append({ type: 'tally.add', payload: { item: 'kopi', qty: 10 } });
+    const remove = await k.append({ type: 'tally.remove', payload: { item: 'kopi', qty: 4 } });
+    await k.undo(remove.id);
+    const rows = await k.query(`SELECT qty FROM tally WHERE item = 'kopi'`);
     assert.equal(rows[0].qty, 10);
   });
 });

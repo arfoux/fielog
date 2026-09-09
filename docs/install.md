@@ -28,8 +28,8 @@ From a repo checkout:
 bun bin/fielog.ts demo
 ```
 
-`demo` runs a two-node offline demo, then signed-mode sync, proving equal
-totals on both sides (`bin/fielog.ts:cmdDemo`).
+`demo` runs a two-node offline demo, then signed-mode sync, proving both sides
+converge to the same records (`bin/fielog.ts:cmdDemo`).
 
 ## Files created at use
 
