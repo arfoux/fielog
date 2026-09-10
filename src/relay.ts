@@ -3,13 +3,22 @@
 // Crash model: the server persists every stored event to a JSONL file BEFORE
 // acking, so kill+restart + client resume from the ack cursor is exact-once
 // by UUID. Live broadcast is a hint only — pull is the source of truth.
-import { existsSync, fsyncSync, mkdirSync, openSync, closeSync, readFileSync, writeSync, writeFileSync } from 'node:fs';
+import { existsSync, fsyncSync, mkdirSync, openSync, closeSync, readFileSync, statSync, writeSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Server, ServerWebSocket } from 'bun';
 import type { LogEvent } from './log.js';
 import { backoffMs, type PushAck, type Relay } from './sync.js';
 import { verifyCapToken, type CapToken } from './auth.js';
 import { RevokeLog, type RevokeEvent, type RevokeInput } from './revokelog.js';
+
+/** DoS budgets (RvSec-1): the relay accepts raw logs from token holders, so
+ * every unbounded surface needs a cap enforced BEFORE store/persist/broadcast.
+ * Defaults are generous (steady-state sync pushes chunks of ~10); per-instance
+ * overrides exist so tests can pin each guard with tiny values. */
+export const MAX_BATCH_EVENTS = 1000;
+export const MAX_EVENT_BYTES = 256 * 1024;
+export const MAX_PULL_EVENTS = 5000;
+export const MAX_RELAY_FILE_BYTES = 512 * 1024 * 1024;
 
 export interface WsRelayServerOpts {
   port?: number; // 0 = ephemeral (read back via .port)
@@ -24,6 +33,11 @@ export interface WsRelayServerOpts {
   /** Refuse to serve without a device registry (default true = legacy open
    * relay for library/dev use). The CLI passes false unless --unsigned. */
   allowUnsigned?: boolean;
+  /** Budget overrides (default the MAX_* constants above). */
+  maxBatchEvents?: number;
+  maxEventBytes?: number;
+  maxPullEvents?: number;
+  maxFileBytes?: number;
 }
 
 type ToServer =
@@ -96,6 +110,22 @@ export class WsRelayServer {
       for (const [id, pem] of Object.entries(opts.revokeAdmins)) this.revokes.addAdmin(id, pem);
     }
     if (opts.file && existsSync(opts.file)) {
+      // Startup guard: the whole JSONL is read into RAM below, so refuse an
+      // over-budget file instead of OOMing (and OOMing again every restart,
+      // since the bytes persist). Fail loud with the path + sizes.
+      const maxBytes = opts.maxFileBytes ?? MAX_RELAY_FILE_BYTES;
+      let size = 0;
+      try {
+        size = statSync(opts.file).size;
+      } catch {
+        size = 0;
+      }
+      if (size > maxBytes) {
+        throw new Error(
+          `relay refuses to load oversized log '${opts.file}': ${size} bytes exceeds the ${maxBytes}-byte budget; ` +
+            `compact/rotate the file or raise maxFileBytes explicitly`,
+        );
+      }
       for (const line of readFileSync(opts.file, 'utf8').split('\n')) {
         const t = line.trim();
         if (!t) continue;
@@ -406,6 +436,9 @@ export class WsRelayServer {
     // Capability gate runs before chaos: rejected payloads are never stored.
     if (msg.op === 'push') {
       if (!this.authorize(ws, msg.req, msg.token, 'relay:push')) return;
+      // Budget gate runs before chaos too: an over-budget batch must be
+      // rejected before store, never written-ahead into the chaos drop path.
+      if (!this.checkPushBudget(ws, msg.req, msg.events)) return;
     } else if (msg.op === 'pull') {
       if (!this.authorize(ws, msg.req, msg.token, 'relay:pull')) return;
     }
@@ -460,7 +493,18 @@ export class WsRelayServer {
       this.send(ws, { op: 'push_ack', req: msg.req, acked, server_time: this.serverTime });
     } else if (msg.op === 'pull') {
       this.pullsReceived += 1;
-      const events = this.order.slice(msg.since);
+      // Cursor parity with revoke_pull: a non-integer or negative cursor is
+      // a bad_cursor error, not a full dump (undefined) or a tail-from-end
+      // (negative) via slice coercion.
+      if (!Number.isInteger(msg.since) || (msg.since as number) < 0) {
+        this.send(ws, { op: 'error', req: msg.req, code: 'bad_cursor', message: `relay rejected pull: bad cursor ${String(msg.since)}` });
+        return;
+      }
+      // Pagination cap: one pull_res never ships the whole tail. The cursor
+      // stays global (order.length), so the client paginates with since +=
+      // events.length until the returned prefix covers the cursor.
+      const cap = this.opts.maxPullEvents ?? MAX_PULL_EVENTS;
+      const events = this.order.slice(msg.since, msg.since + cap);
       this.send(ws, { op: 'pull_res', req: msg.req, events, cursor: this.order.length });
     }
   }
@@ -501,6 +545,38 @@ export class WsRelayServer {
     if (!verifyCapToken(pem, token, scope)) return fail(`capability rejected for ${scope}`);
     return true;
   }
+
+  /** Push budget gate: count + per-event bytes, rejected with bad_batch
+   * BEFORE store/persist/broadcast. Returns true when the batch may proceed.
+   * Non-array payloads fall through (the push path answers bad_batch itself). */
+  private checkPushBudget(ws: ServerWebSocket<SockState>, req: number, events: unknown): boolean {
+    if (!Array.isArray(events)) return true;
+    const maxBatch = this.opts.maxBatchEvents ?? MAX_BATCH_EVENTS;
+    if (events.length > maxBatch) {
+      this.send(ws, {
+        op: 'error',
+        req,
+        code: 'bad_batch',
+        message: `relay rejected push: bad_batch: too many events (${events.length} > ${maxBatch})`,
+      });
+      return false;
+    }
+    const maxBytes = this.opts.maxEventBytes ?? MAX_EVENT_BYTES;
+    for (const ev of events) {
+      const n = JSON.stringify(ev).length;
+      if (n > maxBytes) {
+        this.send(ws, {
+          op: 'error',
+          req,
+          code: 'bad_batch',
+          message: `relay rejected push: bad_batch: event exceeds ${maxBytes} bytes (${n})`,
+        });
+        return false;
+      }
+    }
+    return true;
+  }
+
 
   /** Store new UUIDs (persist first); returns the fresh ones for broadcast. */
   private store(batch: LogEvent[]): LogEvent[] {
@@ -827,19 +903,31 @@ export class WsRelayClient implements Relay {
 
   async pull(since: number): Promise<{ events: LogEvent[]; cursor: number }> {
     await this.maybeSyncRevokes();
-    const res = await this.request('pull', { since });
-    if (res.op === 'error') throw new Error(`relay rejected pull: ${res.message}`);
-    if (res.op !== 'pull_res') throw new Error('relay protocol: expected pull_res');
+    // Paginate: the server caps one pull_res at maxPullEvents while the
+    // cursor stays global, so walk since forward until the fetched prefix
+    // covers the cursor. Order only appends, so old pages stay stable.
+    const events: LogEvent[] = [];
+    let cur = since;
+    let cursor = since;
+    for (;;) {
+      const res = await this.request('pull', { since: cur });
+      if (res.op === 'error') throw new Error(`relay rejected pull: ${res.message}`);
+      if (res.op !== 'pull_res') throw new Error('relay protocol: expected pull_res');
+      events.push(...res.events);
+      cursor = res.cursor;
+      if (res.events.length === 0 || cur + res.events.length >= cursor) break;
+      cur += res.events.length;
+    }
     // Merge live hints the server history doesn't cover yet; UUID dedupe
     // keeps it exact (kernel also skips known UUIDs on apply).
-    const seen = new Set(res.events.map((e) => e.id));
+    const seen = new Set(events.map((e) => e.id));
     const extra: LogEvent[] = [];
     for (const e of this.liveBuf) {
       if (seen.has(e.id)) this.liveIds.delete(e.id);
       else extra.push(e);
     }
     this.liveBuf = extra;
-    return { events: [...res.events, ...extra], cursor: res.cursor };
+    return { events: [...events, ...extra], cursor };
   }
 
   close(): void {

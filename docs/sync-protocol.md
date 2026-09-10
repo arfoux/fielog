@@ -58,6 +58,19 @@ Origin-auth-stripping contract: the receiver does NOT copy the sender's
 seq/hash/device are freshly minted, origin survives only as
 `origin_seq`/`origin_device`. No signature verification here: a peer is a
 trusted same-operator replica; pulls with a forgery registry still go through
-`pullRemote`.
+
+> DO NOT MIX TRANSPORTS ON ONE REPLICA without expecting duplicate work
+> and an auth downgrade. Three cursor namespaces never transfer
+> progress: `sync.ack_seq` / shared `sync.pull_cursor` (single-relay
+> pull, `src/sync.ts:53-55`) vs per-relay `sync.pull_cursor.r<i>`
+> (failover, `src/sync.ts:734-735`) vs deltasync `<cursorKey>.want`
+> (default `deltasync.want`, `src/deltasync.ts:232,248`). Worse,
+> deltasync strips origin auth by design — receiver mints fresh local
+> `seq`/`hash` and drops `signature`/`countersignatures`
+> (`src/deltasync.ts`, see [delta-sync](delta-sync.md)) — so rows that
+> arrived via deltasync and later push through a signed relay propagate
+> as unsigned rows a verifying peer dead-letters. Pick one transport
+> per replica pair; the forgery gate (`verifyPullAuth`) lives only on
+> the `pullRemote` path.
 
 The binding behavioral promises live in [contracts](contracts.md).

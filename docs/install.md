@@ -18,18 +18,27 @@ the runtime needs nothing installed besides `bun` itself
 devDeps (`tsc` for `bun run build`).
 
 What ships on publish (`files` in `package.json`): `src`, `bin`,
-`README.md`, `LICENSE`, `CHANGELOG.md`, `docs`.
+`README.md`, `LICENSE`, `CHANGELOG.md`.
 
 ## Try
 
 From a repo checkout:
 
+Two different demos — same totals, disjoint auth regimes, neither leaves
+state a later stage can pick up:
+
 ```sh
-bun bin/fielog.ts demo
+bun run demo              # = demo/two-node.ts: UNSIGNED dev demo (fixed port 8091)
+bun bin/fielog.ts demo    # = bin/fielog.ts:cmdDemo: SIGNED demo (ephemeral port, minted keys + cap tokens)
 ```
 
-`demo` runs a two-node offline demo, then signed-mode sync, proving both sides
-converge to the same records (`bin/fielog.ts:cmdDemo`).
+Both seed 20 offline entries on device-01, sync two sides, and prove
+identical totals. Both write to a fresh temp dir and kill the relay at
+exit — nothing survives for a later `serve`/`sync` to continue from.
+Unsigned rows carry no signatures, so a signed-mode pull dead-letters
+them: there is no unsigned→signed upgrade step. Pick one regime per task
+and start fresh; production is always the signed path
+(`serve --trust` + `sync --key/--as`, see [quickstart](quickstart.md)).
 
 `createKernel({ file: 'app.db' })` creates two files (`src/kernel.ts:logPathFor`):
 

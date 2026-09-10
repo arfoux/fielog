@@ -40,7 +40,17 @@ const res = await syncDelta(recvLog, recvStore, 'device-b', peer, { chunkSize: 5
 - No signature verification here: peers are trusted replicas of one operator.
   Forgery-gated pull with a device registry stays on `pullRemote` (`src/sync.ts`).
 - No transport in this file: `DeltaPeer` is `{ manifest, fetch }` — memory,
-  file, or ws backed. `createMemoryPeer` covers tests and local dev.
+
+> Mixing warning: deltasync resume state (`<cursorKey>.want`, default
+> `deltasync.want`) is a separate namespace from the relay cursors
+> (`sync.ack_seq` / `sync.pull_cursor` / `sync.pull_cursor.r<i>`) —
+> progress in one never advances the other, so switching transports
+> re-fetches already-acked events. And because the receiver drops the
+> sender's `signature`/`countersignatures`/`seq`/`prev_hash`/`hash`
+> (fresh local mint, origin kept only as `origin_seq`/`origin_device`),
+> deltasync-applied rows pushed later through a signed relay travel as
+> unsigned rows a verifying peer dead-letters. One transport per
+> replica pair (see [sync-protocol](sync-protocol.md)).
 
 ## proofs
 

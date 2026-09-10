@@ -49,13 +49,19 @@ bun bin/fielog.ts sync --file ./ledger.db --relay ws://127.0.0.1:8091 --key ./de
 bun bin/fielog.ts sync --file ./app.db --relay ws://127.0.0.1:8091 --unsigned   # dev only
 ```
 
-## `demo` — two-node (no flags)
+## `demo` — two demos, one regime each (no flags)
 
-`bun bin/fielog.ts demo`: 20 offline entries on device-01, two-sided
-signed-mode sync, then proves
-`device-01 == device-02 == expected`, else exit 1 (`cmdDemo`). Output:
+`bun bin/fielog.ts demo` (`cmdDemo`): 20 offline entries on device-01,
+two-sided SIGNED-mode sync over an ephemeral port, then proves
+`device-01 == device-02 == expected`, else exit 1. Output:
 `sync: device-01 = ... | device-02 = ... | expected = ...` and
 `match on both sides, totals agree`.
+`bun run demo` (`demo/two-node.ts`): the UNSIGNED dev equivalent
+(fixed port 8091, no keys/tokens).
+Both write to a fresh temp dir and kill the relay at exit — no state
+survives, and unsigned rows cannot graduate to signed sync (no
+signatures → signed pull dead-letters them; no upgrade step). See
+[install](install.md) and [quickstart](quickstart.md).
 
 ## exit code
 

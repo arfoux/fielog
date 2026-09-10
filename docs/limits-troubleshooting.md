@@ -5,8 +5,12 @@ Honest limits + ways out of common problems. No false promises.
 ## Design limits
 
 - Bun only. `bun:sqlite` + `Bun.serve` do not exist in Node (`docs/install.md`).
-- One process per file. Two writers in different processes on one `ledger.log` /
-  `cas.json` race last-write-wins (see [cas-store](cas-store.md)).
+- Single writer, one process per file — no exceptions. Two writers in
+  different processes on one `ledger.log` / `ledger.db` race
+  last-write-wins on both files; two `createKernel` handles in one
+  process share nothing (the append/truncate mutex is a cooperative
+  promise chain, `src/kernel.ts:145-156`). One kernel per file,
+  `close()` before reopen. Same for [cas-store](cas-store.md) manifests.
 - Bounded outbox: default 50_000 unsynced events, past that `append`
   throws `ERR_OUTBOX_FULL` (`maxPending`, `src/kernel.ts`). Sync to
   drain, or knowingly raise (`maxPending`) for giant bench builds.

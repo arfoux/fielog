@@ -57,8 +57,18 @@ node1.close();
 node2.close();
 server.kill();
 ```
+> Unsigned → signed is a fresh start, not a continuation. The snippet
+> above and `demo/two-node.ts` (`bun run demo`) write to temp files and
+> kill the relay at exit — nothing survives for a later signed `sync` to
+> continue from, and unsigned rows carry no signatures so a signed-mode
+> pull dead-letters them. There is no unsigned→signed upgrade step.
+> The signed CLI demo (`bun bin/fielog.ts demo`, `bin/fielog.ts:cmdDemo`)
+> is the separate signed equivalent (ephemeral port, minted keys + cap
+> tokens). Port note: the snippets below use fixed `8091`; a second
+> relay on one box collides — pass `port: 0` and read back `.port`
+> (as `cmdDemo` does) for parallel runs.
 
-The full 20-event example is in `demo/two-node.ts`
+The full 20-event unsigned example is in `demo/two-node.ts`
 (run via `bun run demo`).
 
 ## 2 devices: signed mode (production)

@@ -37,6 +37,15 @@ Crash model: every event is persisted to the JSONL file BEFORE ack — kill +
 restart + client resume from the ack cursor = exact-once per UUID. `live`
 broadcast is only a hint; pull is the source of truth.
 
+> CURSORS ARE POSITIONAL, NOT STABLE IDS. `pull(since)` serves
+> `order.slice(since)` with `cursor = order.length`
+> (`src/relay.ts:463-464`): a restart that skips corrupt JSONL lines on
+> reload, or a persist failure that splices the tail back
+> (`src/relay.ts:515-523`), shifts every later position with no
+> epoch/generation check. After any relay restart or failed push,
+> re-pull from an older cursor and let UUID idempotence sort it out —
+> resuming from a pre-restart cursor can silently skip live events.
+
 ## `WsRelayClient` (`src/relay.ts:551-559,571-856`)
 
 ```ts

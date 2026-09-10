@@ -253,7 +253,9 @@ export function isDeviceRevoked(
   try {
     return revokeLog.revokedTokens().some((r) => r.tokenId === '*' && r.deviceId === deviceId);
   } catch {
-    return false;
+    // Revocation state unreadable: fail closed. Treating an unreadable
+    // revoke view as "not revoked" would converge tainted events.
+    return true;
   }
 }
 
@@ -271,7 +273,10 @@ function revokeReason(ev: LogEvent, opts: SyncOpts): string | null {
     try {
       hit = opts.isRevoked(ev) === true;
     } catch {
-      hit = false;
+      // A throwing revoke predicate is unreadable revocation state, not a
+      // clean verdict: quarantine the event (evidence kept) instead of
+      // converging data no predicate could vouch for.
+      return `revoke predicate failed: ${ev.id}`;
     }
     if (hit) return `revoke predicate matched: ${ev.id}`;
   }

@@ -14,7 +14,18 @@ interface KernelOpts {
 }
 createKernel(opts: KernelOpts): Promise<Kernel>;
 logPathFor(file: string): string; // 'ledger.db' -> 'ledger.log'
-```
+
+> SINGLE WRITER, ONE PROCESS PER FILE. The kernel's append/truncate
+> mutex is a cooperative promise chain in one process only
+> (`serialize`, `src/kernel.ts:145-156`): two `createKernel` handles on
+> the same `ledger.db`/`ledger.log` in one process share nothing unless
+> they share the handle, and two processes race last-write-wins on both
+> the JSONL log and the SQLite read-model. Open one kernel per file,
+> `close()` before reopening, never two writers. `hide()` callers must
+> likewise serialize behind the same lock — concurrent `hide()` calls
+> both pass the check and append duplicate hides (safe for the fold,
+> fatal for exactly-once callers; `src/tombstone.ts:114-118`). See
+> [limits-troubleshooting](limits-troubleshooting.md).
 
 ## `Kernel` (`src/kernel.ts:60-83`)
 

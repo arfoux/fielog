@@ -125,10 +125,12 @@ function loadPersistedWant(store: EventStore, cursorKey: string): string[] {
   if (!raw) return [];
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+    if (!Array.isArray(parsed)) throw new Error('not an array');
     return parsed.filter((x): x is string => typeof x === 'string' && x !== '');
-  } catch {
-    return [];
+  } catch (err) {
+    // A corrupt resume queue must surface, never silently drop (refetch
+    // storm) or silently resurrect poison (dead-set loss below).
+    throw new Error(`syncDelta: corrupt ${cursorKey}.want meta (expected JSON string array): ${(err as Error).message}`);
   }
 }
 
@@ -141,10 +143,12 @@ function loadDeadSet(store: EventStore, cursorKey: string): Set<string> {
   if (!raw) return new Set();
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
+    if (!Array.isArray(parsed)) throw new Error('not an array');
     return new Set(parsed.filter((x): x is string => typeof x === 'string' && x !== ''));
-  } catch {
-    return new Set();
+  } catch (err) {
+    // A corrupt dead-set must surface: silently resetting it resurrects
+    // every poison UUID into an unbounded cross-run refetch loop.
+    throw new Error(`syncDelta: corrupt ${cursorKey}.dead meta (expected JSON string array): ${(err as Error).message}`);
   }
 }
 

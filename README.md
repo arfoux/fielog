@@ -41,10 +41,18 @@ into queryable tables.
 
 ## Getting started
 
-- [install](docs/install.md) — requirements (`bun` >= 1.0), setup, files created
 - [quickstart](docs/quickstart.md) — 1 device offline, 2 devices syncing (dev + signed mode), runnable
 - [cli](docs/cli.md) — `serve` / `sync` / `demo`, every flag verified against `bin/fielog.ts`
-- Real examples (ledger domain): `demo/two-node.ts` (`bun run demo`), `example/ledger.mjs` (`bun example/ledger.mjs`)
+- Two demos, one regime each, no surviving state: `bun run demo`
+  (`demo/two-node.ts`, unsigned dev, fixed port 8091) vs
+  `bun bin/fielog.ts demo` (`bin/fielog.ts:cmdDemo`, signed, ephemeral
+  port). Either proves 20-entry totals then exits; neither graduates to
+  the other (unsigned rows carry no signatures). Real ledger example:
+  `example/ledger.mjs` (`bun example/ledger.mjs`)
+- Single writer, one process per file: the kernel mutex is cooperative
+  in-process only (`src/kernel.ts:145-156`). Details:
+  [kernel-api](docs/kernel-api.md),
+  [limits-troubleshooting](docs/limits-troubleshooting.md).
 
 ## Gallery
 

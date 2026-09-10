@@ -28,7 +28,9 @@ value `1000+i` (`i = 0..n-1`), so the expected total
 2. Sqlite meta is lost too: `device.id` (script + test use an explicit
    deviceId to stay stable), ack cursors (the next sync re-pushes from
    seq 0 — safe because pushes are idempotent per UUID, but with duplicate
-   sends), and `snapshot.sealed_seq` (snapshot seal lost).
+   sends; there is no cursor re-seed step, so expect a full duplicate-send
+   storm on first sync), and `snapshot.sealed_seq` (snapshot seal lost —
+   re-`snapshot` + `truncate` from scratch after revive).
 3. Quarantine forensics are deleted too: the history of once-quarantined
    corrupt lines does not survive — the remaining log is still re-verified,
    and named gaps (`gaps`) appear when lines are missing.

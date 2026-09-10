@@ -20,7 +20,7 @@ not intent.
 target exists (`src/kernel.ts:210-218`). Convergence via fold, not local
 presence: compensation arriving before its target parks in
 `records`/`conflicts` and revives when the target lands
-(`resolvePendingEntries`, `src/store.ts:233-267`).
+(`resolvePendingEntries`, `src/store.ts:269-320`).
 Pinned by `scripts/model-oracle.ts` + `docs/model-oracle.md`.
 
 ## 3. seal <= ack: truncate must never eat unsafe data
@@ -41,8 +41,9 @@ exactly once.
 
 ## 5. incremental purge: revoke sweep O(new), not O(log)
 
-`purgeRevoked` (`src/sync.ts:359-386`) tracks the `sync.purge_seq` cursor +
-revoke-signal fingerprint (`sync.purge_revoke_fp`). Same revoke state =
+`purgeRevoked` (`src/sync.ts:369-386`; cursor keys `sync.purge_seq` /
+`sync.purge_revoke_fp` at `src/sync.ts:335-336`) tracks the sweep cursor +
+revoke-signal fingerprint. Same revoke state =
 only new log lines are scanned; new revocation = full rescan.
 An `isRevoked` predicate without `revokeVersion` always rescans (opaque closure).
 
