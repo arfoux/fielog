@@ -1,0 +1,2 @@
+# Hash-chained fixtures: exact bytes are the test. Never convert line endings.
+test/fixtures/**/*.log -text
