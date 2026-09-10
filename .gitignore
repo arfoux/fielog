@@ -4,5 +4,6 @@ dist/
 *.db-wal
 *.db-shm
 *.log
+!test/fixtures/**/*.log
 coverage/
 .opencode/
