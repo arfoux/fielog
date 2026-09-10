@@ -1,4 +1,4 @@
-// Forgery laundering: the relay stores verbatim (dumb by design), so anyone
+// Forgery laundering: the relay stores verbatim (simple by design), so anyone
 // can stash a "entry 1000000 as budi". Pull must verify the ORIGIN signature
 // before the local re-hash mints a clean copy; forgeries dead-letter
 // (skipped, cursor still advances) instead of landing in the log/read-model.

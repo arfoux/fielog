@@ -53,7 +53,7 @@ export async function checkOracle(
   const loud = (what: string, exp: unknown, got: unknown) =>
     `${ctx} MISMATCH ${what}\nexpected=${JSON.stringify(exp)}\nactual=${JSON.stringify(got)}\n--- last ops ---\n${tail}`;
   assert.deepEqual(norm(pay), norm(o.pay), loud('per-actor balances', [...norm(o.pay)], [...norm(pay)]));
-  assert.deepEqual(norm(stk), norm(o.stk), loud('stock balances', [...norm(o.stk)], [...norm(stk)]));
+  assert.deepEqual(norm(stk), norm(o.stk), loud('tally balances', [...norm(o.stk)], [...norm(stk)]));
   assert.deepEqual(new Set(voidR.map((r) => String(r.event_id))), o.void,
     loud('voided ids', [...o.void].sort(), voidR.map((r) => String(r.event_id)).sort()));
 }

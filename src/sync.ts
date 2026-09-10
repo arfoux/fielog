@@ -1,6 +1,6 @@
 // sync.ts — delta push/pull by seq with server ack cursor.
 // Idempotent by UUID, resumable in chunks, exponential backoff.
-// The relay is dumb: accept raw log, broadcast, store. No business logic.
+// The relay is simple: accept raw log, broadcast, store. No business logic.
 import type { AppendLog, LogEvent } from './log.js';
 import { checkAppend, type EventStore } from './store.js';
 import { checkThreshold, verifyEvent, type Countersignature } from './auth.js';
@@ -460,7 +460,7 @@ function applyPullEvents(
     } catch {
       continue;
     }
-    // Forgery laundering gate: the relay stores verbatim (dumb by design),
+    // Forgery laundering gate: the relay stores verbatim (simple by design),
     // so anyone can stash an "entry 1000000 as budi". Verify the ORIGIN hash
     // before the local re-hash below mints a clean copy. Forged events are
     // dead-lettered (skipped, cursor still advances past them).

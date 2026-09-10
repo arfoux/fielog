@@ -12,8 +12,8 @@ not debt.
 
 ## Reasons
 
-1. Zero inter-device debt types/events. No `hutang` / `talangan` /
-   `pinjam` as event types or read-model columns. Value moves between
+1. Zero inter-device debt types/events. No `debt` / `advance` /
+   `loan` as event types or read-model columns. Value moves between
    devices only via existing sync events.
 2. Money-state completes via resolve/sync-ack. Offline only records
    DRAFT / RECORDED; RESOLVED_ONLINE only via

@@ -29,7 +29,7 @@ export interface CorpusManifest {
 }
 
 const ACTORS = ['device-a', 'device-b', 'device-c'];
-const ITEMS = ['kopi', 'gula', 'beras'];
+const ITEMS = ['WIDGET-01', 'WIDGET-02', 'WIDGET-03'];
 
 /** Pure + deterministic: same (seed, n) -> identical events, no IO, no clock. */
 export function genCorpus(seed: number, n: number): Corpus {
@@ -48,7 +48,7 @@ export function genCorpus(seed: number, n: number): Corpus {
     } else if (r < 0.7) {
       const item = pick(ITEMS);
       const qty = 1 + Math.floor(rng() * 20);
-      events.push({ id, type: 'tally.add', payload: { item, qty }, actor: 'gudang' });
+      events.push({ id, type: 'tally.add', payload: { item, qty }, actor: 'device-a' });
       known.push(id);
     } else if (r < 0.85) {
       const item = pick(ITEMS);

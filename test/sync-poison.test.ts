@@ -1,5 +1,5 @@
 // Poison-event pull: one bad write on the relay must not brick sync.
-// The relay stores verbatim (dumb by design), so the pull side skips
+// The relay stores verbatim (simple by design), so the pull side skips
 // dead-letters before they touch the local log and still advances the
 // pull cursor past them. Regression: sync used to throw, pollute the log
 // with the poison UUID, and duplicate it on every retry forever.

@@ -40,7 +40,7 @@ first event, so `undo` always has a target):
 | op | share | effect |
 | --- | --- | --- |
 | `entry` | ~50% | value `100 + floor(rng()*4900)`, actor from `device-a/b/c` |
-| `tally.add` | ~20% | item from `kopi/gula/beras`, qty 1..20 |
+| `tally.add` | ~20% | item from `WIDGET-01/02/03`, qty 1..20 |
 | `tally.remove` | ~15% | same items, qty 1..10 (underflow parks, oracle mirrors it) |
 | `undo.compensate` | ~15% | `reverses` = random earlier corpus id (unknown/voided targets park) |
 
@@ -72,16 +72,17 @@ $ bun scripts/corpus-gen.ts --seed 42 --n 200 --out /tmp/corpus-proof
 [corpus-gen] wrote corpus-42-200.jsonl + corpus-42-200.manifest.json
 ```
 
-Post-rename re-measure (v0.14.27, 2026-09-10 — op types only, same seed/n):
+Post-rename re-measure (v0.14.27, 2026-09-10 — op types + neutral ITEMS/actor, same seed/n):
 
 ```text
 $ bun scripts/corpus-gen.ts --seed 42 --n 200 --out /tmp/corpus-tally
-[corpus-gen] seed=42 n=200 sha=d022597d5078 entry=97 add=40 remove=27 undo=36
+[corpus-gen] seed=42 n=200 sha=ddace9225e2d entry=97 add=40 remove=27 undo=36
 [corpus-gen] wrote corpus-42-200.jsonl + corpus-42-200.manifest.json
 ```
 
 Same distribution (`entry=97 add=40 remove=27 undo=36`); only the sha moves,
-byte-identically, with the `tally.add` / `tally.remove` type strings.
+byte-identically, with the `tally.add` / `tally.remove` type strings and the
+neutral `WIDGET-01/02/03` items (`tally.add` actor `device-a`).
 
 Replay (in-test, 200 events through `createKernel` + shared `Oracle` +
 `checkOracle`): per-actor and tally balances match, `verifyLog` clean.

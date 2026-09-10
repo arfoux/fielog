@@ -25,7 +25,7 @@ describe('clock skew', () => {
       }
       await ka.sync(relay, { baseMs: 1, maxMs: 30 });
       await kb.sync(relay, { baseMs: 1, maxMs: 30 }); // pulls 5 future-stamped events
-      await kb.append({ type: 'entry', value: 50, actor: 'sane' }); // small ts, local seq 6
+      await kb.append({ type: 'entry', value: 50, actor: 'consistent' }); // small ts, local seq 6
       expected += 50;
       const bySeq = await kb.query<{ seq: number; ts_device: number; value: number }>(
         `SELECT e.seq, e.ts_device, b.value FROM _events e LEFT JOIN entries b ON b.event_id = e.id ORDER BY e.seq`,

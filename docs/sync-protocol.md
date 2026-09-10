@@ -1,7 +1,7 @@
 # sync-protocol
 
 Delta push/pull per `seq` with ack cursors (`src/sync.ts`), plus
-manifest-first sync between replicas (`src/deltasync.ts`, deep dive
+manifest-first sync between replicas (`src/deltasync.ts`, details
 [delta-sync](delta-sync.md)).
 
 ## `Relay` + results (`src/sync.ts:8-16,506-543`)

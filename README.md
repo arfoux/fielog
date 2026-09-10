@@ -66,7 +66,7 @@ into queryable tables.
 - [retention](docs/retention.md) — snapshot + truncate
 - [auth](docs/auth.md) — device key, grant, capability token, countersign, revoke
 
-## Subsystems (deep dives)
+## Subsystems (details)
 
 - token: [capability-token](docs/capability-token.md) · revoke:
   [revoke-handshake](docs/revoke-handshake.md),

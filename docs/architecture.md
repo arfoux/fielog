@@ -38,7 +38,7 @@ Per-subsystem details:
 - sync + deltasync + failover: [sync-protocol](sync-protocol.md)
 - relay server + client: [relay](relay.md)
 - snapshot + truncate: [retention](retention.md)
-- auth + revocation: [auth](auth.md), deep dive [capability-token](capability-token.md)
+- auth + revocation: [auth](auth.md), details [capability-token](capability-token.md)
 - attachments: [cas-store](cas-store.md)
 - soft-delete: [tombstone-engine](tombstone-engine.md)
 - disk quota: [quota-guard](quota-guard.md)
@@ -51,7 +51,7 @@ Per-subsystem details:
   via `healSplit` / replay on open (`src/kernel.ts:appendInner`).
 - Wall clocks are display-only. `ts_device` never decides order;
   order belongs to the monotonic `seq` (`src/log.ts:LogEvent`).
-- Dumb relays. Accept raw logs, broadcast, store — no business logic
+- Simple relays. Accept raw logs, broadcast, store — no business logic
   (`src/sync.ts`, `src/relay.ts` header).
 - Pull is the source of truth; `live` broadcast is only a hint
   (`src/relay.ts:WsRelayClient.pull`, `MAX_LIVE_HINTS = 1000`).

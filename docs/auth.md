@@ -1,6 +1,6 @@
 # auth
 
-Device identity, signing, and revocation (`src/auth.ts`). Token deep dive:
+Device identity, signing, and revocation (`src/auth.ts`). Token details:
 [capability-token](capability-token.md); revocation handshake:
 [revoke-handshake](revoke-handshake.md), [revoke-event-log](revoke-event-log.md).
 

@@ -1,5 +1,5 @@
 // relay.ts — real ws transport over Bun.serve, no extra deps.
-// The relay stays dumb: accept raw log, broadcast, store. No business logic.
+// The relay stays simple: accept raw log, broadcast, store. No business logic.
 // Crash model: the server persists every stored event to a JSONL file BEFORE
 // acking, so kill+restart + client resume from the ack cursor is exact-once
 // by UUID. Live broadcast is a hint only — pull is the source of truth.

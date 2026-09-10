@@ -1,7 +1,7 @@
 # relay
 
 Native websocket transport over `Bun.serve`, zero dependencies
-(`src/relay.ts`). The relay stays dumb: accept raw logs, broadcast, store.
+(`src/relay.ts`). The relay stays simple: accept raw logs, broadcast, store.
 
 ## `WsRelayServer` (`src/relay.ts:14-27,62-...`)
 
