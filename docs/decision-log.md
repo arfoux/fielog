@@ -98,7 +98,8 @@ names. Behavior is identical apart from names; no shims, no aliases.
 
 ## Verification
 - `bun scripts/corpus-gen.ts --seed 42 --n 200 --out /tmp/corpus-tally`
-  → `sha=d022597d5078 entry=97 add=40 remove=27 undo=36`, exit 0.
+  → `sha=ddace9225e2d entry=97 add=40 remove=27 undo=36`, exit 0
+  (re-measured after neutral corpus values; distribution unchanged).
   Same distribution as the pre-rename base; only the sha moves with the type strings.
 - `bun demo/two-node.ts` → exit 0, both sides match.
 - `bun bin/fielog.ts demo` → exit 0, totals agree.
