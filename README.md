@@ -34,7 +34,7 @@ await k.append({ type: 'sample', sensor: 'temp-1', celsius: 21.5 });
 k.close();
 ```
 
-Offline writes are always stored as `RECORDED`; sync/ack happens when online.
+Offline writes are stored as `DRAFT`/`RECORDED` (pre-resolved); sync/ack happens when online.
 `append`/`query`/`undo` never touch the network — only `sync` does. Any event
 shape is stored and synced; the read-model projects `entry` / `tally` / `undo`
 into queryable tables.

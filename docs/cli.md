@@ -32,7 +32,7 @@ bun bin/fielog.ts serve --port 8091 --file ./relay.log --unsigned   # dev only
 
 | flag | required | meaning |
 |---|---|---|
-| `--file <ledger.db>` | yes | local kernel file |
+| `--file <app.db>` | yes | local kernel file |
 | `--relay <ws url>` | yes | relay URL, e.g. `ws://127.0.0.1:8091` |
 | `--key <priv.pem>` | yes, unless `--unsigned` | device privkey; the capability token is minted via `kernel.capToken` |
 | `--as <device>` | yes with `--key` | signing device id + token owner |
@@ -46,13 +46,13 @@ defaults to 10 in `pushPending`) — for bulk use the `kernel.sync` API with
 
 ```sh
 bun bin/fielog.ts sync --file ./ledger.db --relay ws://127.0.0.1:8091 --key ./device-01.priv --as device-01
-bun bin/fielog.ts sync --file ./ledger.db --relay ws://127.0.0.1:8091 --unsigned   # dev only
+bun bin/fielog.ts sync --file ./app.db --relay ws://127.0.0.1:8091 --unsigned   # dev only
 ```
 
 ## `demo` — two-node (no flags)
 
-`bun bin/fielog.ts demo`: 20 offline events on device-01 (ledger entries in
-this demo), two-sided signed-mode sync, then proves
+`bun bin/fielog.ts demo`: 20 offline entries on device-01, two-sided
+signed-mode sync, then proves
 `device-01 == device-02 == expected`, else exit 1 (`cmdDemo`). Output:
 `sync: device-01 = ... | device-02 = ... | expected = ...` and
 `match on both sides, totals agree`.

@@ -19,9 +19,9 @@ function usage(): string {
     '  serve --port <n> --file <relay.log> --trust <id=pub.pem> [--trust ...]',
     '    run the file-backed ws relay in signed mode (rejects unknown devices)',
     '  serve --port <n> --file <relay.log> --unsigned   open relay (dev only)',
-    '  sync --file <ledger.db> --relay <ws url> --key <priv.pem> --as <device>',
+  '  sync --file <app.db> --relay <ws url> --key <priv.pem> --as <device>',
     '    push+pull the kernel delta with a capability token',
-    '  sync --file <ledger.db> --relay <ws url> --unsigned   unsigned (dev only)',
+  '  sync --file <app.db> --relay <ws url> --unsigned   unsigned (dev only)',
     '  demo   two-node: offline events, then signed-mode sync with matching totals',
   ].join('\n');
 }

@@ -17,9 +17,9 @@ k.close();
 ```
 
 No network at all: `append`/`query`/`undo` never touch the network
-(`src/kernel.ts`). Offline writes are always stored as `RECORDED`;
-`PAID_OFFLINE` / arbitrary `state` is rejected by `checkAppend` — sync/ack
-decides resolution, never the offline writer.
+(`src/kernel.ts`). Offline writes are stored as `DRAFT`/`RECORDED`
+(pre-resolved states); any other `state` is rejected by `checkAppend` —
+sync/ack decides resolution, never the offline writer.
 
 Same kernel, other domains — any event shape is stored and synced:
 

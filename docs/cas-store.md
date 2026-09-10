@@ -1,7 +1,7 @@
 # cas-store
 
 Skill-14 (SOLID) port: content-addressed blob store for attachments
-(game snapshots, file versions, telemetry batches — receipt photos and note
+(game snapshots, file versions, telemetry batches — photo attachments and note
 bodies are one domain). The sha256 of the bytes IS the key, so
 identical bytes stored twice cost one blob plus a refcount. Refs are
 explicit; the blob dies at zero; reads re-hash and quarantine on
