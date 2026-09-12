@@ -7,6 +7,19 @@ Untagged commits are folded into the next tag that shipped them.
 
 (No unreleased changes yet.)
 
+## v0.15.0 — truncate guards, fail-closed gates, relay budgets
+
+- Retention: `truncate()` guarded by `guardSeal` — sweep stops at the acked/applied prefix, skips legally-held events, and never splits a tombstone hide/show pair; report names held events and pairs that blocked the rest.
+- Read-model: tamper gate fails closed on hash mismatch (no silent merge of edited payloads); swept UUIDs recorded in `_swept_ids` so re-appending an excised id throws instead of forking log vs store.
+- Hash chain: `verifyChain` checks seq continuity plus hash/prev linkage, with `opts.base`/`opts.startSeq` to pin a post-sweep base (foreign `prev_hash` hints at `log.verify()` instead of failing cryptic).
+- Quota wired: `createKernel({ quotaLimitBytes })` reserves per append and throws `ERR_QUOTA_EXCEEDED`/`ERR_QUOTA_UNKNOWN` fail-closed before anything is written; `kernel.quota()` reports usage.
+- Relay budgets: per-batch event-count and per-event byte caps on push, revoke push, and raw frames; pull paginated with count + total-byte caps (client walks pages to the global cursor); oversized startup file refused loud instead of OOMing; byte sizes measured in UTF-8, not UTF-16 length.
+- Auth: `CapToken.notBefore` activation floor (early token fails closed); corrupt delta-sync resume/dead-set meta throws instead of silently refetching or resurrecting poison.
+- Surface: `health()`/`verifyLog()` expose `skipped` poison lines (open-time replay warns `WARN_REPLAY_SKIPPED`); CAS quarantine persisted in the manifest (`has` hides quarantined keys, `stat` reports the sidecar, `gc` skips them); tombstone `show` atomic with same-replica check; snapshot lock file serializes cross-process writers (`ERR_SNAPSHOT_IN_FLIGHT`); torn-tail repair fsyncs file + dir.
+- Compat: interop-seal test skips when the sibling checkout is absent (green CI without it).
+- Bench (2026-09-12, slice fa03a62, bun 1.4.0): append 262/s (p50 3.06 ms, p99 7.89 ms); that cost is fsync-per-append + SQLite apply — durability, not overhead. Full numbers in `docs/bench.md`, the single source of truth.
+- Decisions: `docs/decisions.md` records five standing calls (epoch-less token reissue, `dist/` out of scope, plaintext relay behind WireGuard, no claim engine here, dated single-source bench pins).
+
 ## v0.13.0–v0.14.26 — folded (no per-tag notes; untagged waves per the rule above)
 
 - Auth: granular per-token capabilities (named TTLs) enforced per operation; revoke event log with convergent merge, revoke handshake on every relay connect/pull, revoke quarantine + retroactive purge on sync.
