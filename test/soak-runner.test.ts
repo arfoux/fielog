@@ -160,7 +160,7 @@ describe('soak-runner', () => {
       k = await createKernel({ file: dbPath });
       assert.equal(k.ackSeq(), 10);
       const cut = await k.truncate();
-      assert.deepEqual(cut, { removed: 10, kept: 3, sealedSeq: 10 });
+      assert.deepEqual(cut, { removed: 10, kept: 3, sealedSeq: 10, held: [], pairs: [] });
       assert.deepEqual(k.verifyLog(), { ok: true });
       const rows = await k.query<{ total: number; n: number }>(
         `SELECT SUM(value) AS total, COUNT(*) AS n FROM entries WHERE voided = 0`,
@@ -174,7 +174,7 @@ describe('soak-runner', () => {
       const snap3 = await k.snapshot();
       assert.equal(snap3.sealedSeq, 13);
       const cut2 = await k.truncate();
-      assert.deepEqual(cut2, { removed: 3, kept: 0, sealedSeq: 13 });
+      assert.deepEqual(cut2, { removed: 3, kept: 0, sealedSeq: 13, held: [], pairs: [] });
       assert.deepEqual(k.verifyLog(), { ok: true });
       const rows2 = await k.query<{ total: number }>(`SELECT SUM(value) AS total FROM entries WHERE voided = 0`);
       assert.equal(rows2[0].total, expected);

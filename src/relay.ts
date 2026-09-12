@@ -18,7 +18,18 @@ import { RevokeLog, type RevokeEvent, type RevokeInput } from './revokelog.js';
 export const MAX_BATCH_EVENTS = 1000;
 export const MAX_EVENT_BYTES = 256 * 1024;
 export const MAX_PULL_EVENTS = 5000;
+export const MAX_PULL_TOTAL_BYTES = 4 * 1024 * 1024;
+export const MAX_REVOKE_BATCH_EVENTS = 1000;
+export const MAX_RAW_MESSAGE_BYTES = 4 * 1024 * 1024;
 export const MAX_RELAY_FILE_BYTES = 512 * 1024 * 1024;
+
+/** UTF-8 byte length (not UTF-16 .length): multibyte payloads must not undercount. */
+export function utf8Bytes(s: string): number {
+  if (typeof Buffer !== 'undefined' && typeof Buffer.byteLength === 'function') {
+    try { return Buffer.byteLength(s, 'utf8'); } catch { /* fall through */ }
+  }
+  return new TextEncoder().encode(s).length;
+}
 
 export interface WsRelayServerOpts {
   port?: number; // 0 = ephemeral (read back via .port)
@@ -36,7 +47,10 @@ export interface WsRelayServerOpts {
   /** Budget overrides (default the MAX_* constants above). */
   maxBatchEvents?: number;
   maxEventBytes?: number;
+  maxRevokeBatchEvents?: number;
   maxPullEvents?: number;
+  maxRawMessageBytes?: number;
+  maxPullTotalBytes?: number;
   maxFileBytes?: number;
 }
 
@@ -389,11 +403,28 @@ export class WsRelayServer {
     fsyncSync(this.logFd); // durable before any ack: restart loses nothing
   }
 
-
   private onMessage(
     ws: ServerWebSocket<SockState>,
     raw: string,
   ): void {
+    // Raw-message cap BEFORE JSON.parse: a giant anonymous frame is rejected
+    // cheaply without parse/verify/store work. Best-effort req echo for the
+    // client; unparseable frames are just dropped.
+    const maxRaw = this.opts.maxRawMessageBytes ?? MAX_RAW_MESSAGE_BYTES;
+    const rawBytes = utf8Bytes(raw);
+    if (rawBytes > maxRaw) {
+      let req = -1;
+      try {
+        const probe = JSON.parse(raw) as { req?: unknown };
+        if (Number.isInteger(probe?.req)) req = probe.req as number;
+      } catch {
+        /* unparseable: drop below */
+      }
+      if (req >= 0) {
+        this.send(ws, { op: 'error', req, code: 'bad_batch', message: `relay rejected message: raw frame exceeds ${maxRaw} bytes (${rawBytes})` });
+      }
+      return;
+    }
     let msg: ToServer;
     try {
       msg = JSON.parse(raw) as ToServer;
@@ -424,6 +455,10 @@ export class WsRelayServer {
     if (msg.op === 'revoke_push') {
       this.revokePushesReceived += 1;
       const batch = Array.isArray(msg.events) ? msg.events : [];
+      // Revoke budget gate BEFORE merge: each merged event costs an ed25519
+      // verify, so an unbounded anonymous batch is CPU-DoS. Reject cheaply
+      // with bad_batch, never verified/stored.
+      if (!this.checkRevokeBudget(ws, msg.req, batch)) return;
       // No snapshot sorts here: merge only appends, so the pre-merge size is
       // the exact cursor of the fresh suffix — diffSince slices it for free.
       const cursorBefore = this.revokes.size;
@@ -502,9 +537,26 @@ export class WsRelayServer {
       }
       // Pagination cap: one pull_res never ships the whole tail. The cursor
       // stays global (order.length), so the client paginates with since +=
-      // events.length until the returned prefix covers the cursor.
+      // events.length until the returned prefix covers the cursor. A total
+      // byte cap bounds giant single events that a count cap cannot.
       const cap = this.opts.maxPullEvents ?? MAX_PULL_EVENTS;
-      const events = this.order.slice(msg.since, msg.since + cap);
+      const maxTotal = this.opts.maxPullTotalBytes ?? MAX_PULL_TOTAL_BYTES;
+      const page = this.order.slice(msg.since, msg.since + cap);
+      let total = 0;
+      let kept = page.length;
+      for (let i = 0; i < page.length; i++) {
+        total += utf8Bytes(JSON.stringify(page[i]));
+        if (total > maxTotal) { kept = i; break; }
+      }
+      if (page.length === 0) {
+        this.send(ws, { op: 'pull_res', req: msg.req, events: [], cursor: this.order.length });
+        return;
+      }
+      if (kept === 0) {
+        this.send(ws, { op: 'error', req: msg.req, code: 'too_large', message: `relay rejected pull: pull page exceeds ${maxTotal} bytes` });
+        return;
+      }
+      const events = page.slice(0, kept);
       this.send(ws, { op: 'pull_res', req: msg.req, events, cursor: this.order.length });
     }
   }
@@ -563,13 +615,44 @@ export class WsRelayServer {
     }
     const maxBytes = this.opts.maxEventBytes ?? MAX_EVENT_BYTES;
     for (const ev of events) {
-      const n = JSON.stringify(ev).length;
+      const n = utf8Bytes(JSON.stringify(ev));
       if (n > maxBytes) {
         this.send(ws, {
           op: 'error',
           req,
           code: 'bad_batch',
           message: `relay rejected push: bad_batch: event exceeds ${maxBytes} bytes (${n})`,
+        });
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** Revoke budget gate: count + per-event bytes, rejected with bad_batch
+   * BEFORE merge (each merged event costs an ed25519 verify). Anonymous
+   * callers get no per-event verify work past the cap. */
+  private checkRevokeBudget(ws: ServerWebSocket<SockState>, req: number, events: unknown): boolean {
+    if (!Array.isArray(events)) return true;
+    const maxBatch = this.opts.maxRevokeBatchEvents ?? this.opts.maxBatchEvents ?? MAX_REVOKE_BATCH_EVENTS;
+    if (events.length > maxBatch) {
+      this.send(ws, {
+        op: 'error',
+        req,
+        code: 'bad_batch',
+        message: `relay rejected revoke_push: bad_batch: too many events (${events.length} > ${maxBatch})`,
+      });
+      return false;
+    }
+    const maxBytes = this.opts.maxEventBytes ?? MAX_EVENT_BYTES;
+    for (const ev of events) {
+      const n = utf8Bytes(JSON.stringify(ev));
+      if (n > maxBytes) {
+        this.send(ws, {
+          op: 'error',
+          req,
+          code: 'bad_batch',
+          message: `relay rejected revoke_push: bad_batch: event exceeds ${maxBytes} bytes (${n})`,
         });
         return false;
       }

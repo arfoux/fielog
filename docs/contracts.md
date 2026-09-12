@@ -7,10 +7,12 @@ not intent.
 
 - Push: partial ack halts, the cursor advances only up to what was acked;
   the next run resumes from there (`applyPushAck`, `src/sync.ts:134-184`).
-- Pull: poison (invalid shape) / forged (bad signature) / revoked events
-  are quarantined into `_quarantine` as evidence, the cursor still advances
-  (`applyPullEvents`, `src/sync.ts:395-503`; forgery gate
-  `verifyPullAuth`, `src/sync.ts:195-225`).
+- Pull: revoked events and re-drive apply failures are quarantined into
+  `_quarantine` as evidence, the cursor still advances (`applyPullEvents`,
+  `src/sync.ts:395-503`; forgery gate `verifyPullAuth`,
+  `src/sync.ts:195-225`). Poison (invalid shape) and forged (bad signature)
+  events are skipped WITHOUT quarantine evidence — silent-continue, cursor
+  still advances past them (`src/sync.ts:460-472`).
 - Deltasync: shape-invalid UUIDs are recorded in meta `<cursorKey>.dead`
   and never re-fetched; the want-list still drains (`src/deltasync.ts:10-13`).
 

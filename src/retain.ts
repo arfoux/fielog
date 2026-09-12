@@ -39,21 +39,51 @@ export function snapshotPathFor(dbPath: string): string {
  * first, or vice versa). */
 const snapshotsInFlight = new Set<string>();
 
-/** Online full copy (VACUUM INTO) + seal stamp in both snapshot and live meta. */
-export function takeSnapshot(
-  store: EventStore,
-  dbPath: string,
-  sealedSeq: number,
-  dest?: string,
-): SnapshotResult {
-  if (snapshotsInFlight.has(dbPath)) {
-    throw new Error(
-      `ERR_SNAPSHOT_IN_FLIGHT: snapshot already in progress for '${dbPath}'; ` +
-        `finish it before starting another (overlapping copies would stamp live meta out of order)`,
-    );
-  }
-  snapshotsInFlight.add(dbPath);
+/** Cross-process single-writer guard for takeSnapshot. The in-process set
+ * above cannot see a second OS process, so a lock file next to the live db
+ * (created O_CREAT|O_EXCL) serializes writers across processes. A holder
+ * crash can leave a stale file behind; the next writer then fails loud with
+ * ERR_SNAPSHOT_IN_FLIGHT (delete the `<db>.snapshot.lock` file once no
+ * writer is running) instead of silently interleaving two VACUUM INTO +
+ * stamp sequences. Single writer only: concurrent snapshots are rejected,
+ * never queued. */
+export function snapshotLockPathFor(dbPath: string): string {
+  return `${dbPath}.snapshot.lock`;
+}
+
+function acquireSnapshotLock(dbPath: string): number | null {
+  const lockPath = snapshotLockPathFor(dbPath);
   try {
+    return openSync(lockPath, 'wx', 0o644);
+  } catch {
+    return null;
+  }
+}
+
+function failSnapshotInFlight(dbPath: string): never {
+  throw new Error(
+    `ERR_SNAPSHOT_IN_FLIGHT: snapshot already in progress for '${dbPath}'; ` +
+      `finish it before starting another (overlapping copies would stamp live meta out of order)`,
+  );
+}
+
+ /** Online full copy (VACUUM INTO) + seal stamp in both snapshot and live meta. */
+ export function takeSnapshot(
+   store: EventStore,
+   dbPath: string,
+   sealedSeq: number,
+   dest?: string,
+ ): SnapshotResult {
+   if (snapshotsInFlight.has(dbPath)) {
+     throw new Error(
+       `ERR_SNAPSHOT_IN_FLIGHT: snapshot already in progress for '${dbPath}'; ` +
+         `finish it before starting another (overlapping copies would stamp live meta out of order)`,
+     );
+   }
+  const lockFd = acquireSnapshotLock(dbPath);
+  if (lockFd === null) failSnapshotInFlight(dbPath);
+   snapshotsInFlight.add(dbPath);
+   try {
     const snapshot = dest ?? snapshotPathFor(dbPath);
     try {
       unlinkSync(snapshot); // VACUUM INTO refuses an existing target
@@ -110,6 +140,8 @@ export function takeSnapshot(
     return { snapshot, sealedSeq, dbSeq };
   } finally {
     snapshotsInFlight.delete(dbPath);
+    try { closeSync(lockFd); } catch { /* already closed */ }
+    try { unlinkSync(snapshotLockPathFor(dbPath)); } catch { /* released by other means */ }
   }
 }
 

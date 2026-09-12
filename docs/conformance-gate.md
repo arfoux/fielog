@@ -11,7 +11,7 @@ Exit code is 0 only when all four checks pass.
 |---|---------|------|----------------|
 | 1 | `base`  | `git merge-base HEAD <main-ref>` equals the `<main-ref>` tip (default `main`) | `merge-base X != main tip Y; rebase onto main`, or `ref not found` |
 | 2 | `tree`  | `git status --porcelain` is empty | `dirty: <first 5 lines>` |
-| 3 | `tests` | `bun test` reports exactly `EXPECTED_PASS` passes and `0` failures (default 66/0) | `bun test P/F, expected E/0` |
+| 3 | `tests` | `bun test` reports at least `EXPECTED_PASS` passes and `0` failures (default 66/0) | `bun test P/F, expected >=E/0` |
 | 4 | `scope` | every file in `git diff --name-only <base>...HEAD` is in the spin allowlist (`scripts/conformance-gate.sh`, `docs/conformance-gate.md`) | `out-of-scope: <files>; allowlist: ...` |
 
 ## Usage

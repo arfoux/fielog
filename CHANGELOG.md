@@ -3,20 +3,27 @@
 All entries describe user-visible changes shipped under each tag, in tag order.
 Untagged commits are folded into the next tag that shipped them.
 
+## Unreleased
 
-## v0.14.27 — audit + perf waves, docs, gallery
+(No unreleased changes yet.)
 
+## v0.13.0–v0.14.26 — folded (no per-tag notes; untagged waves per the rule above)
+
+- Auth: granular per-token capabilities (named TTLs) enforced per operation; revoke event log with convergent merge, revoke handshake on every relay connect/pull, revoke quarantine + retroactive purge on sync.
+- Storage: sha-keyed CAS store (refcount, quarantine); tombstone soft-delete engine with GC guard + legal hold; quota guard with reserve + fail-closed admission.
+- Sync: manifest-first delta sync (want-list resume, UUID idempotency); hash-chain-log facade with quarantine + re-anchor.
+- Compat: v0.5 fixtures + conformance runner (writer superset rule).
+- Rig & harness: two-device rig, seeded corpus + corruption generators, bench-honesty doc + check script, cold-drill log-only recovery, model oracle, soak runner, chaos-kill drill, flake-hunter, pre-merge conformance gate, watchdog, mismatch-stop, completion protocol, ff-only merge runner.
+- Audit + perf waves: typecheck clean (`PushResult` exported, relay rng field, CAS writeSync narrowing); 30 audit suspects fixed (relay fail-closed persist — no ack for unwritten events, ack only stored ids; store seq-vs-id collision no longer swallowed; fractional value rejected; sync dead-letter cursors; retain empty-guard returns 0; revokelog convergent tie-break; tombstone guard covers show/target; quota remaining clamped; canonical payload key order; duplicate-id append rejected; seq-gap verification; device mismatch throws with first-explicit adoption; threshold misconfig throws; CAS orphan sweep + EEXIST tolerance + fstat + guarded quarantine; deltasync real dead-letter list + honest fetched metric); kernel split healing O(1) steady-state; relay liveBuf dedup via persistent Set, token verdicts cached per revoke size, incremental `purgeRevoked`, deterministic backoff jitter by default. Suite: 218 tests green, tsc clean.
+## v0.14.27 — docs, gallery, universal wire keys
+
+- Wire keys universalized (no commerce terms): `entry`/`value`/`tally`/`resolve`, device ids; English CLI/demo/scripts/tests narrative (schema field `oleh` kept, fixtures kept).
 - Docs: README is now the entry point + index; one concern per topic page (install,
   quickstart, architecture, kernel-api, sync-protocol, relay, retention,
   auth, contracts, cli, limits-troubleshooting), API tables verified against `src/`.
 - New: `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md` (solo/small-team).
-- Bench smoke 2026-09-09 `bun bench/bench-append.ts 200` = 306
-  appends/sec, p50 3.07 ms, p99 7.63 ms; full numbers in `docs/bench.md`.
-- Typecheck clean: `PushResult` exported, relay rng field, cas writeSync narrowing.
-- 30 audit suspects fixed: relay fail-closed persist (no ack for unwritten events, ack only stored ids), store seq-vs-id collision no longer swallowed, fractional value rejected, sync dead-letter cursors (one poison event never pins push/pull), retain empty-guard returns 0, revokelog convergent tie-break, tombstone guard covers show/target, quota remaining clamped, canonical payload key order, duplicate-id append rejected, seq-gap verification, device mismatch throws (first-explicit adoption allowed), threshold misconfig throws, cas orphan sweep + EEXIST tolerance + fstat + guarded quarantine, deltasync real dead-letter list + honest fetched metric.
-- Kernel split healing is O(1) steady-state (suspect flag + open-time replay); undo/resolve stay blind compensators (peer targets may sync later — model-oracle pins this).
-- Perf: relay liveBuf dedupes via persistent Set, token verdicts cached per revoke size; `purgeRevoked` incremental via `sync.purge_seq` cursor + fingerprint; backoff jitter deterministic by default (opt-in random).
-- Suite: 218 tests green, tsc clean.
+- Bench: full numbers in `docs/bench.md` (single source of truth for figures).
+- Repo: lean tarball (no docs), OIDC tag-publish provenance, byte-exact fixtures via gitattributes.
 
 - Gallery: 8 APNG explainers + logo in README (docs/gifs/, outside the tarball).
 ## v0.1.0 — offline kernel

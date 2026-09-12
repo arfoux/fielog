@@ -100,12 +100,12 @@ function fsyncDir(path: string): void {
 }
 
 /** Atomic manifest persist: write tmp + fsync + rename, same cutover as retain.ts. */
-function persistManifest(dir: string, refs: Record<string, number>): void {
+function persistManifest(dir: string, refs: Record<string, number>, quarantined: Set<string>): void {
   const path = manifestPathFor(dir);
   const tmp = path + '.tmp';
   const fd = openSync(tmp, 'w');
   try {
-    writeSync(fd, JSON.stringify({ refs }));
+    writeSync(fd, JSON.stringify({ refs, quarantined: [...quarantined].sort() }));
     fsyncSync(fd);
   } finally {
     closeSync(fd);
@@ -124,6 +124,7 @@ export function openCas(dir: string): CasStore {
   mkdirSync(join(dir, 'sha'), { recursive: true });
   mkdirSync(join(dir, 'quarantine'), { recursive: true });
   let refs: Record<string, number> = {};
+  const quarantined = new Set<string>();
   const mpath = manifestPathFor(dir);
   if (existsSync(mpath)) {
     let parsed: unknown;
@@ -141,10 +142,18 @@ export function openCas(dir: string): CasStore {
       }
       if (v > 0) refs[k] = v;
     }
+    // Quarantine section: keys whose blobs failed re-hash (fail-closed evidence).
+    // Optional for backward compat; validated strictly when present.
+    const qraw = (parsed as Record<string, unknown>).quarantined;
+    if (qraw !== undefined) {
+      if (!Array.isArray(qraw) || qraw.some((k) => typeof k !== 'string' || !KEY_RE.test(k))) {
+        throw new Error('corrupt cas manifest (bad quarantine section, refusing to guess refs)');
+      }
+      for (const k of qraw as string[]) quarantined.add(k);
+    }
   } else {
-    persistManifest(dir, refs);
+    persistManifest(dir, refs, quarantined);
   }
-
   const store: CasStore & { quarantined: number } = {
     dir,
     quarantined: 0,
@@ -172,13 +181,14 @@ export function openCas(dir: string): CasStore {
           if (code === 'EEXIST') break;
           if (code === 'EPERM' || code === 'EACCES' || code === 'EBUSY') {
             if (existsSync(blob)) break;
-            if (attempt < 2) continue;
+            if (attempt < 100) continue;
           }
           throw err;
         }
       }
       refs[key] = (refs[key] ?? 0) + 1;
-      persistManifest(dir, refs);
+      quarantined.delete(key);
+      persistManifest(dir, refs, quarantined);
       return key;
     },
 
@@ -224,8 +234,8 @@ export function openCas(dir: string): CasStore {
         }
         fsyncDir(dirname(blob));
         fsyncDir(dirname(qpath));
-        delete refs[key];
-        persistManifest(dir, refs);
+        quarantined.add(key);
+        persistManifest(dir, refs, quarantined);
         store.quarantined += 1;
         return null;
       }
@@ -234,13 +244,26 @@ export function openCas(dir: string): CasStore {
 
     has(key: string): boolean {
       if (!KEY_RE.test(key)) return false;
-      return key in refs && existsSync(casPathFor(dir, key));
+      if (!(key in refs) || quarantined.has(key)) return false;
+      return existsSync(casPathFor(dir, key));
     },
 
     stat(key: string): CasStat | null {
       if (!KEY_RE.test(key)) return null;
       const n = refs[key];
       if (n === undefined) return null;
+      if (quarantined.has(key)) {
+        let size = 0;
+        try {
+          const fd = openSync(casQuarantinePathFor(dir, key), 'r');
+          try {
+            size = fstatSync(fd).size;
+          } finally {
+            try { closeSync(fd); } catch { /* ignore */ }
+          }
+        } catch { size = 0; }
+        return { key, size, refcount: n };
+      }
       const blob = casPathFor(dir, key);
       let fd: number | undefined;
       try {
@@ -248,7 +271,6 @@ export function openCas(dir: string): CasStore {
         const size = fstatSync(fd).size;
         return { key, size, refcount: n };
       } catch {
-        // Blob missing or unreadable between the refs check and now.
         return null;
       } finally {
         if (fd !== undefined) {
@@ -265,7 +287,7 @@ export function openCas(dir: string): CasStore {
       checkKey(key);
       if (!(key in refs)) throw new Error('link of unknown cas key (put first, no phantom refs)');
       refs[key] += 1;
-      persistManifest(dir, refs);
+      persistManifest(dir, refs, quarantined);
     },
 
     unlink(key: string): boolean {
@@ -274,19 +296,22 @@ export function openCas(dir: string): CasStore {
       if (n === undefined) throw new Error('unlink of unknown cas key (no phantom refs)');
       if (n <= 1) {
         delete refs[key];
+        quarantined.delete(key);
         const blob = casPathFor(dir, key);
         if (existsSync(blob)) unlinkSync(blob);
-        persistManifest(dir, refs);
+        try { unlinkSync(casQuarantinePathFor(dir, key)); } catch { /* no sidecar */ }
+        persistManifest(dir, refs, quarantined);
         return true;
       }
       refs[key] = n - 1;
-      persistManifest(dir, refs);
+      persistManifest(dir, refs, quarantined);
       return false;
     },
 
     gc(): string[] {
       const dead: string[] = [];
       for (const key of Object.keys(refs)) {
+        if (quarantined.has(key)) continue;
         if (!existsSync(casPathFor(dir, key))) {
           delete refs[key];
           dead.push(key);
@@ -320,12 +345,12 @@ export function openCas(dir: string): CasStore {
           dead.push(key);
         }
       }
-      persistManifest(dir, refs);
+      persistManifest(dir, refs, quarantined);
       return dead;
     },
 
     close(): void {
-      persistManifest(dir, refs);
+      persistManifest(dir, refs, quarantined);
     },
   };
   return store;

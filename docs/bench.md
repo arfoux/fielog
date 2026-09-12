@@ -1,8 +1,8 @@
 # fielog benchmarks
 
-Measured 2026-09-05. Every number below is a real measurement from this
+Measured 2026-09-12 (slice fa03a62, bun 1.4.0, same machine below).
+Every number below is a real measurement from this
 machine — no estimates. Re-run with `bun bench/bench-*.ts [N]`
-(or `bun run bench:append | bench:query | bench:sync`).
 
 ## machine
 
@@ -30,15 +30,15 @@ machine — no estimates. Re-run with `bun bench/bench-*.ts [N]`
 
 ## results
 
-| bench | n | result |
+| bench | n | result (2026-09-12) |
 |---|---|---|
-| append throughput | 5000 | 435 append/sec (total 11.48 s) |
-| append per-op | 5000 | p50 2.191 ms, p99 3.370 ms |
-| query `sum_all` (100k events) | 200 iters | p50 16.557 ms, p99 21.744 ms |
-| query `point_by_seq` (100k events) | 200 iters | p50 0.052 ms, p99 0.118 ms |
-| sync push over real ws relay | 10000 | 470 events/sec (21.29 s, chunk 500) |
-| sync pull over real ws relay | 10000 | 232 events/sec (43.12 s, chunk 500) |
-| sync end-to-end (push+pull) | 10000 | 155 events/sec |
+| append throughput | 5000 | 262 append/sec (total 19.10 s) |
+| append per-op | 5000 | p50 3.063 ms, p99 7.894 ms |
+| query `sum_all` (10k events) | 200 iters | p50 0.906 ms, p99 1.875 ms |
+| query `point_by_seq` (10k events) | 200 iters | p50 0.034 ms, p99 0.100 ms |
+| sync push over real ws relay | 10000 | 395 events/sec (25.33 s, chunk 500) |
+| sync pull over real ws relay | 10000 | 181 events/sec (55.29 s, chunk 500) |
+| sync end-to-end (push+pull) | 10000 | 124 events/sec |
 
 ## notes
 
@@ -46,5 +46,5 @@ machine — no estimates. Re-run with `bun bench/bench-*.ts [N]`
   apply per event; that is the durability cost, not overhead to optimize away.
 - Pull is slower than push because the pulling side fsync-appends every event
   to its own log and applies it to SQLite, while the push side mostly streams.
-- The 100k query build took 258.9 s at the same append rate; query latencies
-  above are steady-state on the finished 100k-event store in tmp.
+- Query this round used a 10k-event store (build 54.6 s); the previous
+  100k-store latencies (2026-09-05) are superseded, not comparable.

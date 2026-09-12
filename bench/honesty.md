@@ -73,8 +73,8 @@ HONESTY: FAIL bench=append slice mismatch head=d03e683b8e40acf3a484617cdfd42a254
 exit=2
 ```
 
-Note: 99 append/sec here vs 435 append/sec in `docs/bench.md`
-(docs/bench.md:34, measured 2026-09-05). Different wall-clock on a
+Note: 99 append/sec here vs 262 append/sec in `docs/bench.md`
+(docs/bench.md, measured 2026-09-12). Different wall-clock on a
 loaded laptop, same machine and runtime — that is exactly why rule 3
 exists: the number is only valid with its pins, and cross-day numbers
 are not comparable.

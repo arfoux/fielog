@@ -202,8 +202,22 @@ export function openLog(path: string, defaultDeviceId: string, signer?: (ev: Log
           // Torn tail: the write never completed, so no event was ever
           // durable — truncate it, keep a forensic copy, carry on.
           const f = openSync(path, 'r+');
-          ftruncateSync(f, starts[i]);
-          closeSync(f);
+          try {
+            ftruncateSync(f, starts[i]);
+            fsyncSync(f);
+          } finally {
+            closeSync(f);
+          }
+          try {
+            const dfd = openSync(dirname(path), 'r');
+            try {
+              fsyncSync(dfd);
+            } finally {
+              closeSync(dfd);
+            }
+          } catch {
+            /* platforms without directory fsync: file fsync still holds */
+          }
           noteQuarantine(i + 1, t + ' /* torn tail, truncated on open */');
           repairedTail = true;
         } else {

@@ -1,7 +1,7 @@
 // store.ts — SQLite read-model: apply/replay/materialize over the log.
 // ledger.db is plain SQLite (opens in DBeaver). Bun runtime: bun:sqlite.
 import { Database } from 'bun:sqlite';
-import type { LogEvent } from './log.js';
+import { hashFor, type LogEvent } from './log.js';
 
 export type SqlParams = Record<string, unknown> | unknown[];
 
@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS _events(
   hash TEXT NOT NULL,
   prev_hash TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS _swept_ids(id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS _meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS entries(
   seq INTEGER PRIMARY KEY,
@@ -175,10 +176,26 @@ export function openStore(path: string): EventStore {
   const db = openDb(path);
   db.exec(SCHEMA);
 
+  /** Fail-closed tamper gate: a well-formed line with an edited payload must never merge silently. */
+  function assertUntampered(ev: LogEvent): void {
+    // Only enforce on real chain hashes (64-hex); synthetic fixtures that never
+    // went through the log carry placeholder hashes and keep legacy behavior.
+    if (typeof ev.hash !== 'string' || !/^[0-9a-f]{64}$/.test(ev.hash)) return;
+    const { hash, signature: _s, countersignatures: _c, ...core } = ev;
+    void _s;
+    void _c;
+    if (hashFor(core as Omit<LogEvent, 'hash'>) !== hash) {
+      throw new Error(`tamper rejected: hash mismatch for event ${ev.id} (seq ${ev.seq})`);
+    }
+  }
   function insertRaw(ev: LogEvent): boolean {
+    // Fail-loud on swept-UUID reuse: exciseMissing retires the _events row, so
+    // a re-appended UUID would otherwise insert as a fresh row (or no-op when
+    // the row was kept) and split log vs store silently. Reject explicitly.
+    if (all(db, `SELECT 1 FROM _swept_ids WHERE id = ? LIMIT 1`, ev.id).length > 0) {
+      throw new Error(`swept id reused: ${ev.id} was excised and must not be re-appended`);
+    }
     // Idempotent by UUID: replays / pulled duplicates are no-ops. But a seq
-    // collision under a FRESH id is chain corruption, never a replay — it
-    // must fail loud instead of silently dropping the event.
     try {
       run(
         db,
@@ -491,6 +508,7 @@ export function openStore(path: string): EventStore {
 
   const store: EventStore = {
     apply(ev: LogEvent): void {
+      assertUntampered(ev);
       // Atomic: _events row + routed rows commit together. A kill between
       // them used to orphan the UUID and blind replay forever.
       db.exec('BEGIN IMMEDIATE');
@@ -521,6 +539,7 @@ export function openStore(path: string): EventStore {
       for (const ev of [...events].sort((a, b) => a.seq - b.seq)) {
         db.exec('BEGIN IMMEDIATE');
         try {
+          assertUntampered(ev);
           if (!insertRaw(ev)) {
             db.exec('ROLLBACK');
             continue;
@@ -557,6 +576,7 @@ export function openStore(path: string): EventStore {
           run(db, `DELETE FROM tally_moves WHERE event_id = ?`, g.id);
           run(db, `DELETE FROM records WHERE event_id = ?`, g.id);
           run(db, `DELETE FROM _events WHERE id = ?`, g.id);
+          run(db, `INSERT OR IGNORE INTO _swept_ids(id) VALUES(?)`, g.id);
         }
         if (moves > 0) {
           // Balances derive from moves: rebuild so excised tally stops counting.

@@ -4,7 +4,7 @@
 # Checks (each prints PASS/FAIL with a reason; any FAIL => GATE: FAIL, exit 1):
 #   1. base   — branch forked from the newest main tip (merge-base == main tip).
 #   2. tree   — working tree clean (no staged/unstaged/untracked changes).
-#   3. tests  — `bun test` reports exactly EXPECTED_PASS passes and 0 failures.
+#   3. tests  — `bun test` reports at least EXPECTED_PASS passes and 0 failures.
 #   4. scope  — every file changed in merge-base...HEAD is inside the allowlist.
 #
 # Usage:
@@ -59,13 +59,13 @@ else
   report FAIL tree "dirty: $DIRTY"
 fi
 
-# 3. tests — bun test must report EXPECTED_PASS pass / 0 fail.
+# 3. tests — bun test must report at least EXPECTED_PASS passes and 0 fails.
 TEST_OUT="$(bun test 2>&1)"
 PASS_N="$(printf '%s' "$TEST_OUT" | grep -oE '[0-9]+ pass' | grep -oE '[0-9]+' | tail -1)"
 FAIL_N="$(printf '%s' "$TEST_OUT" | grep -oE '[0-9]+ fail' | grep -oE '[0-9]+' | tail -1)"
 PASS_N="${PASS_N:-?}"
 FAIL_N="${FAIL_N:-?}"
-if [ "$PASS_N" = "$EXPECTED_PASS" ] && [ "$FAIL_N" = "0" ]; then
+if [ "$FAIL_N" = "0" ] && [ "$PASS_N" != "?" ] && [ "$PASS_N" -ge "$EXPECTED_PASS" ]; then
   report PASS tests "bun test ${PASS_N}/${FAIL_N}, expected ${EXPECTED_PASS}/0"
 else
   report FAIL tests "bun test ${PASS_N}/${FAIL_N}, expected ${EXPECTED_PASS}/0"

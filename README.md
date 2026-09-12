@@ -95,10 +95,8 @@ into queryable tables.
 
 ## Numbers, limits, contributing
 
-- Benchmark: [bench](docs/bench.md) (measured 2026-09-05) —
-  smoke 2026-09-10: `bun bench/bench-append.ts 200` →
-  **311 appends/sec, p50 3.03 ms, p99 6.84 ms**.
-  Re-run via `bun run bench:append | bench:query | bench:sync`.
+- Benchmark: [bench](docs/bench.md) — all figures live there (single source
+  of truth). Re-run via `bun run bench:append | bench:query | bench:sync`.
 - Log compat: [compat](docs/compat.md) · changelog: [CHANGELOG](CHANGELOG.md)
 - Limits + troubleshooting: [limits-troubleshooting](docs/limits-troubleshooting.md)
 - Contributing: [CONTRIBUTING](CONTRIBUTING.md) · security: [SECURITY](SECURITY.md) ·

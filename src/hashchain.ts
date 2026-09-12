@@ -33,14 +33,24 @@ export interface HashChain extends AppendLog {}
 /**
  * Pure chain replay over already-loaded events.
  *
- * `gaps` lists seqs whose predecessor was quarantined (known gap, not
- * tamper): their prev_hash is forgiven and echoed back, mirroring
- * AppendLog.verify(). Empty gaps = strict contiguous chain from GENESIS.
+ * Checks hash + prev linkage AND seq continuity (mirroring
+ * AppendLog.verify()): only a forward jump onto a quarantined `gaps` seq
+ * is forgiven (re-anchored). The chain is anchored at the first event's
+ * seq, so a bare post-sweep suffix verifies — pass `opts.base` (marker tip)
+ * and `opts.startSeq` (marker truncated_before) to pin the expected base
+ * instead. Without them a foreign `prev_hash` on the first event fails
+ * with a hint to use `log.verify()` (which knows the truncate marker);
+ * post-sweep callers should prefer `openHashChain(path).verify()`.
  */
-export function verifyChain(events: LogEvent[], gaps: Iterable<number> = []): VerifyResult {
+export function verifyChain(
+  events: LogEvent[],
+  gaps: Iterable<number> = [],
+  opts: { base?: string; startSeq?: number } = {},
+): VerifyResult {
   const gapSet = new Set(gaps);
   const echoed: number[] = [];
-  let prev = GENESIS_HASH;
+  let prev = opts.base ?? GENESIS_HASH;
+  let expectedSeq = opts.startSeq ?? events[0]?.seq ?? 1;
   for (const e of events) {
     const { hash, signature: _s, countersignatures: _c, ...core } = e;
     void _s;
@@ -48,13 +58,36 @@ export function verifyChain(events: LogEvent[], gaps: Iterable<number> = []): Ve
     if (hashFor(core) !== hash) {
       return { ok: false, at: e.seq, reason: 'hash mismatch (tampered payload?)' };
     }
+    const seqForgiven = e.seq > expectedSeq && gapSet.has(e.seq);
+    if (e.seq !== expectedSeq && !seqForgiven) {
+      return {
+        ok: false,
+        at: e.seq,
+        reason:
+          e.seq < expectedSeq
+            ? 'duplicate seq (forked/edited log?)'
+            : e.seq === events[0]?.seq && e.prev_hash !== prev && opts.base === undefined
+              ? 'prev_hash mismatch (swept prefix? pass opts.base/startSeq or use log.verify())'
+              : 'seq gap (truncated/edited log?)',
+      };
+    }
     if (e.prev_hash !== prev) {
       if (!gapSet.has(e.seq)) {
-        return { ok: false, at: e.seq, reason: 'prev_hash mismatch (truncated/edited log?)' };
+        return {
+          ok: false,
+          at: e.seq,
+          reason:
+            e.seq === events[0]?.seq && opts.base === undefined
+              ? 'prev_hash mismatch (swept prefix? pass opts.base/startSeq or use log.verify())'
+              : 'prev_hash mismatch (truncated/edited log?)',
+        };
       }
-      echoed.push(e.seq); // re-anchor: known gap, chain resumes here
+      echoed.push(e.seq);
+    } else if (seqForgiven) {
+      echoed.push(e.seq);
     }
     prev = hash;
+    expectedSeq = e.seq + 1;
   }
   return echoed.length > 0 ? { ok: true, gaps: echoed } : { ok: true };
 }

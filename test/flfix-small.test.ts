@@ -101,12 +101,15 @@ describe('flfix-small audit suspects', () => {
     // the fold stays hidden — so retry-after-racy-check never corrupts.)
     await assert.rejects(hide(k, 'no-such-id'), /ERR_UNKNOWN_TARGET/);
     assert.equal(k.health().events, before);
-    await hide(k, a.id, { reason: 'wrong value input' });
-    await hide(k, a.id, { reason: 'racy retry' });
+    const h1 = await hide(k, a.id, { reason: 'wrong value input' });
+    const eventsAfterFirst = k.health().events;
+    const h2 = await hide(k, a.id, { reason: 'racy retry' });
+    assert.equal(h2.id, h1.id, 'duplicate hide must be an exactly-once no-op');
+    assert.equal(k.health().events, eventsAfterFirst, 'duplicate hide must not append');
     const rows = await k.query<{ n: number }>(
       `SELECT COUNT(*) AS n FROM records WHERE type = '${TOMBSTONE_HIDE}'`,
     );
-    assert.equal(rows[0].n, 2);
+    assert.equal(rows[0].n, 1);
   });
 
   it('quota remaining never goes negative; denial stays loud', () => {

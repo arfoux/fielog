@@ -49,7 +49,7 @@ describe('retention', () => {
 
     const before = statSync(k.logPath).size;
     const cut = await k.truncate();
-    assert.deepEqual(cut, { removed: N, kept: 0, sealedSeq: N });
+    assert.deepEqual(cut, { removed: N, kept: 0, sealedSeq: N, held: [], pairs: [] });
     const after = statSync(k.logPath).size;
     assert.ok(after < before / 10, `log did not shrink: ${before} -> ${after}`);
     assert.deepEqual(k.verifyLog(), { ok: true });

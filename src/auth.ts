@@ -151,9 +151,9 @@ export interface CapToken {
   scopes: string[]; // e.g. ['relay:push', 'relay:pull']
   issuedAt: number;
   expiresAt: number;
+  notBefore?: number; // optional activation floor: now < notBefore → not yet valid
   signature?: string; // device signature over the canonical token
 }
-
 export function canonicalCapToken(t: Omit<CapToken, 'signature'>): string {
   return JSON.stringify({
     id: t.id,
@@ -161,6 +161,7 @@ export function canonicalCapToken(t: Omit<CapToken, 'signature'>): string {
     scopes: [...t.scopes].sort(),
     issuedAt: t.issuedAt,
     expiresAt: t.expiresAt,
+    ...(t.notBefore !== undefined ? { notBefore: t.notBefore } : {}),
   });
 }
 
@@ -205,6 +206,7 @@ export function verifyCapToken(
   if (!token.signature) return false;
   if (!token.id) return false; // id-less legacy token: fail closed, re-mint
   if (token.expiresAt <= token.issuedAt) return false;
+  if (token.notBefore !== undefined && now < token.notBefore) return false;
   if (now > token.expiresAt) return false;
   if (revocations?.isRevoked(token.id)) return false;
   const { signature, ...core } = token;

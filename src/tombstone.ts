@@ -98,42 +98,113 @@ export function isHidden(store: EventStore, id: string): boolean {
   return hiddenIds(store).has(id);
 }
 
+/** Module mutex: serializes check-then-append in hide/show so concurrent
+ *  callers need no outer lock. Cooperative (same process), like the kernel
+ *  append/truncate chain. */
+let chain: Promise<void> = Promise.resolve();
+function runAtomic<T>(fn: () => Promise<T>): Promise<T> {
+  const next = chain.then(fn);
+  chain = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
+}
+
 async function storedIds(k: Hider): Promise<Set<string>> {
   const rows = await k.query<{ id: string }>(`SELECT id FROM _events`);
   return new Set(rows.map((r) => r.id));
+}
+
+/** Tombstone fold over the kernel's view: ids hidden right now. */
+async function hiddenIdsOf(k: Hider): Promise<Set<string>> {
+  const rows = await k.query<{ type: string; payload: unknown }>(
+    `SELECT type, payload FROM _events WHERE type IN ('${TOMBSTONE_HIDE}', '${TOMBSTONE_SHOW}') ORDER BY seq`,
+  );
+  const hidden = new Set<string>();
+  for (const r of rows) {
+    const p =
+      typeof r.payload === 'string'
+        ? (JSON.parse(r.payload) as Record<string, unknown>)
+        : (r.payload as Record<string, unknown>);
+    if (r.type === TOMBSTONE_HIDE && typeof p?.hides === 'string') hidden.add(p.hides);
+    else if (r.type === TOMBSTONE_SHOW && typeof p?.shows === 'string') hidden.delete(p.shows);
+  }
+  return hidden;
+}
+
+/** Fail-loud when `k` and `store` are not the same replica. Compares the
+ *  exposed store identity when available, then requires both views to agree
+ *  on whether the target is stored. */
+async function assertPairedStore(k: Hider, store: EventStore, targetId: string): Promise<void> {
+  if (k !== null && typeof k === 'object' && 'store' in k) {
+    const inner: unknown = k.store;
+    if (inner !== undefined && inner !== store) {
+      throw new Error(`ERR_STORE_MISMATCH: tombstone.show needs k and store on the same replica`);
+    }
+  }
+  const kHas = (await storedIds(k)).has(targetId);
+  const sHas = store.hasId(targetId);
+  if (kHas !== sHas) {
+    throw new Error(`ERR_STORE_MISMATCH: tombstone.show needs k and store on the same replica`);
+  }
 }
 
 /**
  * Soft-delete: append a `tombstone.hide` compensating event. The target line
  * stays in the log; readers via `isHidden`/`hiddenIds` exclude it. Throws
  * `ERR_UNKNOWN_TARGET` before appending when the target is not stored, so a
- * typo never leaves a poison line behind. Hiding an already-hidden id is a
- * no-op-safe duplicate (fold keeps it hidden).
+ * typo never leaves a poison line behind.
  *
- * NOTE: the stored-target check and the append are not atomic. Concurrent
- * writers must serialize `hide()` calls (e.g. behind the kernel append
- * lock); otherwise two racers can both pass the check and append duplicate
- * hides. Duplicates are safe — the fold stays hidden — but callers needing
- * exactly-one hide event must hold the lock across the call.
+ * Atomic: the stored-target check and the append run under a module mutex,
+ * so concurrent `hide()` calls need no outer lock. A second concurrent hide
+ * of an already-hidden id is an exactly-once no-op — it returns the existing
+ * hide event instead of appending a duplicate.
  */
 export async function hide(
   k: Hider,
   targetId: string,
   opts?: { actor?: string; reason?: string },
 ): Promise<LogEvent> {
-  if (!(await storedIds(k)).has(targetId)) {
-    throw new Error(`ERR_UNKNOWN_TARGET: tombstone.hide needs a stored event id (got ${targetId})`);
-  }
-  return k.append({
-    type: TOMBSTONE_HIDE,
-    payload: { hides: targetId, ...(opts?.reason ? { reason: opts.reason } : {}) },
-    ...(opts?.actor ? { actor: opts.actor } : {}),
+  return runAtomic(async () => {
+    if (!(await storedIds(k)).has(targetId)) {
+      throw new Error(`ERR_UNKNOWN_TARGET: tombstone.hide needs a stored event id (got ${targetId})`);
+    }
+    if ((await hiddenIdsOf(k)).has(targetId)) {
+      const rows = await k.query<{ id: string; type: string; payload: unknown }>(
+        `SELECT id, type, payload FROM _events WHERE type = '${TOMBSTONE_HIDE}' ORDER BY seq`,
+      );
+      for (const r of rows) {
+        const p =
+          typeof r.payload === 'string'
+            ? (JSON.parse(r.payload) as Record<string, unknown>)
+            : (r.payload as Record<string, unknown>);
+        if (p?.hides === targetId) {
+          const found = await k.query<Record<string, unknown>>(
+            `SELECT * FROM _events WHERE id = '${r.id.replace(/'/g, "''")}'`,
+          );
+          const row = found[0];
+          if (row) {
+            const raw = row['payload'];
+            return { ...(row as unknown as LogEvent), payload: typeof raw === 'string' ? JSON.parse(raw) : raw };
+          }
+          break;
+        }
+      }
+    }
+    return k.append({
+      type: TOMBSTONE_HIDE,
+      payload: { hides: targetId, ...(opts?.reason ? { reason: opts.reason } : {}) },
+      ...(opts?.actor ? { actor: opts.actor } : {}),
+    });
   });
 }
 
 /**
  * Lift a soft-delete. Throws `ERR_NOT_HIDDEN` when the id is not hidden, so
- * a stray show never leaves a poison line behind.
+ * a stray show never leaves a poison line behind. Throws `ERR_STORE_MISMATCH`
+ * when `k` and `store` are not the same replica. Atomic with `hide()` under
+ * the module mutex, so no outer lock is needed.
  */
 export async function show(
   k: Hider,
@@ -141,13 +212,16 @@ export async function show(
   targetId: string,
   opts?: { actor?: string },
 ): Promise<LogEvent> {
-  if (!isHidden(store, targetId)) {
-    throw new Error(`ERR_NOT_HIDDEN: tombstone.show needs a hidden event id (got ${targetId})`);
-  }
-  return k.append({
-    type: TOMBSTONE_SHOW,
-    payload: { shows: targetId },
-    ...(opts?.actor ? { actor: opts.actor } : {}),
+  return runAtomic(async () => {
+    if (!isHidden(store, targetId)) {
+      throw new Error(`ERR_NOT_HIDDEN: tombstone.show needs a hidden event id (got ${targetId})`);
+    }
+    await assertPairedStore(k, store, targetId);
+    return k.append({
+      type: TOMBSTONE_SHOW,
+      payload: { shows: targetId },
+      ...(opts?.actor ? { actor: opts.actor } : {}),
+    });
   });
 }
 

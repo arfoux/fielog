@@ -16,8 +16,10 @@ import {
   type Relay,
   type SyncOpts,
 } from './sync.js';
-import { clampSealToStored, takeSnapshot, sweepLogFile } from './retain.js';
+import { takeSnapshot, sweepLogFile } from './retain.js';
+import { guardSeal, type Hold, type SplitPair } from './tombstone.js';
 import { CAP_TOKEN_TTL_MS, mintCapToken, signEvent, type CapToken } from './auth.js';
+import { openQuotaGuard, type QuotaGuard, type QuotaStatus } from './quota.js';
 
 export interface KernelOpts {
   file: string; // e.g. 'ledger.db' (+ sidecar 'ledger.log')
@@ -26,6 +28,12 @@ export interface KernelOpts {
   clock?: () => number;
   /** Max locally queued events awaiting ack (default 50_000). Append past it throws ERR_OUTBOX_FULL. */
   maxPending?: number;
+  /** Hard byte ceiling over [db, log] files, enforced fail-closed on every
+   * append (throws ERR_QUOTA_EXCEEDED / ERR_QUOTA_UNKNOWN). Unset = no quota. */
+  quotaLimitBytes?: number;
+  /** Per-append byte estimate reserved against the quota (default: measured
+   * JSON size of the event input, min 1). Test seam for deterministic denial. */
+  quotaEstimateBytes?: number;
   /** ed25519 private key PEM: every local append is signed at source, so
    * trusted-mode receivers verify (not dead-letter) legitimate traffic. */
   privateKeyPem?: string;
@@ -43,6 +51,8 @@ export interface LogHealth {
   quarantined: number;
   repairedTail: boolean;
   gaps: number[];
+  /** Poison log lines skipped by the open-time replay (hash mismatch / corrupt apply). */
+  skipped: number;
 }
 
 export interface SnapshotInfo {
@@ -55,6 +65,10 @@ export interface TruncateInfo {
   removed: number;
   kept: number;
   sealedSeq: number;
+  /** Holds on this replica and whether each blocked the sweep. */
+  held: Hold[];
+  /** Tombstone/target pairs the seal would have split. */
+  pairs: SplitPair[];
 }
 
 export interface Kernel {
@@ -73,11 +87,13 @@ export interface Kernel {
   conflicts(): Promise<Record<string, unknown>[]>;
   ackSeq(): number;
   serverTime(): number | null;
-  verifyLog(): { ok: boolean; at?: number; reason?: string; gaps?: number[] };
+  verifyLog(): { ok: boolean; at?: number; reason?: string; gaps?: number[]; skipped?: number };
   health(): LogHealth;
+  /** Current quota snapshot, or null when no quotaLimitBytes was configured. */
+  quota(): QuotaStatus | null;
   /** Online full copy of the db + seal the acked prefix into it. */
   snapshot(dest?: string): Promise<SnapshotInfo>;
-  /** Sweep the sealed prefix from the log (atomic file cutover). No-op when unsealed. */
+  /** Sweep the sealed log prefix (guarded by ack seq, holds, tombstone pairs). */
   truncate(): Promise<TruncateInfo>;
   close(): void;
 }
@@ -126,9 +142,11 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
   }
   const signer = opts.privateKeyPem ? (ev: LogEvent) => signEvent(opts.privateKeyPem as string, ev) : undefined;
   let log: AppendLog = openLog(logPath, deviceId, signer);
-  // Crash recovery: replay the log into the read-model (idempotent by UUID),
-  // then excise rows the log no longer carries (quarantined, never swept).
-  store.replay(log.readAll());
+  const openReplay = store.replay(log.readAll());
+  if (openReplay.skipped > 0) {
+    console.warn(`WARN_REPLAY_SKIPPED: ${openReplay.skipped} poison log line(s) skipped on open of '${logPath}'`);
+  }
+  let replaySkipped = openReplay.skipped;
   store.exciseMissing(
     log.readAll().map((e) => e.seq),
     log.sealedBelow,
@@ -138,6 +156,17 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
   const maxPending = opts.maxPending ?? DEFAULT_OUTBOX_CAP;
   if (!Number.isInteger(maxPending) || maxPending < 1) {
     throw new Error(`maxPending must be a positive integer, got ${opts.maxPending}`);
+  }
+  // Byte quota over the two state files (db + log sidecar). Fail-closed:
+  // every append reserves its estimated size first, so ERR_QUOTA_EXCEEDED
+  // and ERR_QUOTA_UNKNOWN propagate and nothing is written past the ceiling.
+  const quota: QuotaGuard | null =
+    opts.quotaLimitBytes === undefined
+      ? null
+      : openQuotaGuard({ limitBytes: opts.quotaLimitBytes, files: [dbPath, logPath] });
+  const quotaFixed = opts.quotaEstimateBytes;
+  if (quotaFixed !== undefined && (!Number.isInteger(quotaFixed) || quotaFixed < 1)) {
+    throw new Error(`quotaEstimateBytes must be a positive integer, got ${opts.quotaEstimateBytes}`);
   }
   // Failover memory across sync calls: failed relays cool down with backoff,
   // then get re-probed; list order decides fail-back.
@@ -183,7 +212,21 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
           `oldest unsynced seq is ${getAckSeq(store) + 1}; sync to drain before appending`,
       );
     }
-    const ev = log.append(input);
+    // Reserve before growing state; release once the growth is measured on
+    // disk (or when the append fails) so `held` never double-counts `used`.
+    let reserved = 0;
+    if (quota) {
+      reserved = quotaFixed ?? Math.max(1, Buffer.byteLength(JSON.stringify(input), 'utf8'));
+      quota.reserve(reserved); // throws ERR_QUOTA_* fail-closed: nothing written below
+    }
+    let ev: LogEvent;
+    try {
+      ev = log.append(input);
+    } catch (err) {
+      if (quota) quota.release(reserved);
+      throw err;
+    }
+    if (quota) quota.release(reserved);
     // Contract: the log line above is already fsynced, so a store failure
     // here is a split, not a loss. Fail loud (never swallow) and let the
     // next append/restart re-drive the durable line via healSplit/replay.
@@ -232,35 +275,48 @@ export async function createKernel(opts: KernelOpts): Promise<Kernel> {
     conflicts: () => Promise.resolve(store.query(`SELECT * FROM conflicts WHERE status = 'open'`)),
     ackSeq: () => getAckSeq(store),
     serverTime: () => getServerTime(store),
-    verifyLog: () => log.verify(),
+    verifyLog: () => {
+      const v = log.verify();
+      return replaySkipped > 0 ? { ...v, skipped: replaySkipped } : v;
+    },
     health: () => {
       const v = log.verify();
-      return { events: log.readAll().length, quarantined: log.quarantined, repairedTail: log.repairedTail, gaps: v.gaps ?? [] };
+      return { events: log.readAll().length, quarantined: log.quarantined, repairedTail: log.repairedTail, gaps: v.gaps ?? [], skipped: replaySkipped };
     },
+    quota: () => (quota ? quota.status() : null),
     snapshot: (dest) => Promise.resolve(takeSnapshot(store, dbPath, getAckSeq(store), dest)),
     truncate: () =>
       serialize(async () => {
         const sealed = Number(store.getMeta('snapshot.sealed_seq') ?? 0);
-        if (sealed <= 0) return { removed: 0, kept: log.readAll().length, sealedSeq: 0 };
-        // Belt and suspenders on top of ack-implies-stored: a stale seal or a
-        // cursor that outran the read-model must shrink to the safely swept
-        // prefix (or to a no-op) instead of deleting unacked/unapplied data.
-        const effective = clampSealToStored(
+        const noop = { removed: 0, kept: log.readAll().length, sealedSeq: 0, held: [], pairs: [] };
+        if (sealed <= 0) return noop;
+        // Guard the seal before sweeping: never remove unacked/unapplied
+        // data, a legally-held event, or half a tombstone/target pair
+        // (a swept target whose hide survives — or vice versa — would
+        // resurrect or orphan on replay). Sweep report.effective and tell
+        // the operator exactly what blocked the rest.
+        const report = guardSeal(
           store,
           log.readAll().map((e) => e.seq),
           sealed,
           getAckSeq(store),
         );
-        if (effective <= 0) return { removed: 0, kept: log.readAll().length, sealedSeq: 0 };
+        if (report.effective <= 0)
+          return { removed: 0, kept: log.readAll().length, sealedSeq: 0, held: report.held, pairs: report.pairs };
         // The log fd must be closed for the sweep, so a failed sweep must
         // still reopen it: a closed-but-referenced log breaks every later
         // append with EBADF. finally keeps the kernel usable either way.
         log.close();
         try {
-          return sweepLogFile(logPath, effective);
+          const swept = sweepLogFile(logPath, report.effective);
+          return { ...swept, sealedSeq: report.effective, held: report.held, pairs: report.pairs };
         } finally {
           log = openLog(logPath, deviceId, signer);
-          store.replay(log.readAll()); // incremental: kept suffix re-applies, db stands
+          const r = store.replay(log.readAll()); // incremental: kept suffix re-applies, db stands
+          if (r.skipped > 0) {
+            console.warn(`WARN_REPLAY_SKIPPED: ${r.skipped} poison log line(s) skipped after truncate of '${logPath}'`);
+          }
+          replaySkipped += r.skipped;
           store.exciseMissing(
             log.readAll().map((e) => e.seq),
             log.sealedBelow,
