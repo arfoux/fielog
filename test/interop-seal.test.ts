@@ -1,17 +1,21 @@
 // Interop e2e (fielog -> moltarc): kernel append batch -> snapshot ->
 // seal snapshot via moltarc API -> verify -> query asof -> truncate log.
 // Uses API imports only (no CLI, no src edits).
+// Requires the moltarc checkout as a sibling (../../molt); skips in CI
+// where fielog stands alone.
 import { describe, it, afterEach } from 'bun:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createKernel, type Kernel } from '../src/kernel.ts';
 import { MemoryRelay } from '../src/sync.ts';
-// Cross-repo API imports (moltarc). Relative path keeps this test new-file-only.
-import { seal } from '../../molt/src/seal.ts';
-import { verifyAll } from '../../molt/src/verify.ts';
-import { queryAsOf } from '../../molt/src/timetravel.ts';
+const here = dirname(fileURLToPath(import.meta.url));
+const MOLT = join(here, '..', '..', 'molt', 'src', 'seal.ts');
+const maybeIt = existsSync(MOLT) ? it : it.skip;
+// Cross-repo API imports (moltarc). Dynamic import keeps the module
+// loadable when the sibling checkout is absent.
 
 describe('interop-seal e2e', () => {
   const closers: Array<() => void> = [];
@@ -21,7 +25,12 @@ describe('interop-seal e2e', () => {
     }
   });
 
-  it('append -> snapshot -> seal -> verify -> asof -> truncate', async () => {
+  // Dynamic import: static import would break module load when the sibling
+  // moltarc checkout is absent (CI); existsSync gate above skips instead.
+  maybeIt('append -> snapshot -> seal -> verify -> asof -> truncate', async () => {
+    const { seal } = await import('../../molt/src/seal.ts');
+    const { verifyAll } = await import('../../molt/src/verify.ts');
+    const { queryAsOf } = await import('../../molt/src/timetravel.ts');
     const dir = mkdtempSync(join(tmpdir(), 'fielog-interop-seal-'));
     const file = join(dir, 'ledger.db');
     const k = await createKernel({ file });
