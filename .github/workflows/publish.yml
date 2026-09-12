@@ -25,3 +25,30 @@ jobs:
         continue-on-error: true
       - run: npm install -g npm@latest
       - run: npm publish --provenance --access public
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract release notes
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          awk -v tag="$TAG" '
+            $0 ~ "^## " tag "([ ]|—|-|$)" { in_sec=1; next }
+            /^## / { if (in_sec) exit }
+            in_sec { print }
+          ' CHANGELOG.md | sed -e '/./,$!d' > /tmp/notes.md
+          if [ ! -s /tmp/notes.md ]; then
+            echo "Release $TAG" > /tmp/notes.md
+          fi
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, skipping."
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file /tmp/notes.md
+          fi
