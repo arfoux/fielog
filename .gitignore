@@ -7,3 +7,6 @@ dist/
 !test/fixtures/**/*.log
 coverage/
 .opencode/
+measured.json
+*.sqlite*
+*.dll
